@@ -11,7 +11,7 @@ import { calculateScheduleTimes, calculateDaySummary } from '@/lib/routeEngine';
 import { getTodayISO, getWeekDates, getWeekLabel, addDays, generateId } from '@/lib/timeUtils';
 import { TravelSegment, Client, TeamSchedule, TEAM_COLORS, DaySchedule, StaffMember, getNextColorIndex, Location as AppLocation } from '@/lib/types';
 import { computeDayWarnings } from '@/lib/scheduleWarnings';
-import { exportDayRosterCSV } from '@/lib/rosterCsvExport';
+import { exportDayRosterXLSX } from '@/lib/rosterXlsxExport';
 import { useAuth } from '@/lib/hooks/useAuth';
 import { createClient } from '@/lib/supabase/client';
 import { SavedClient } from '@/lib/hooks/useClients';
@@ -1044,6 +1044,10 @@ export default function SchedulePage({ overrideRole }: { overrideRole?: 'owner' 
     const newDate = addDays(state.focusedDate, 7);
     dispatch({ type: 'SET_FOCUSED_DATE', date: newDate });
   };
+  const goToThisWeek = () => {
+    dispatch({ type: 'SET_FOCUSED_DATE', date: getTodayISO() });
+  };
+  const isCurrentWeek = weekDates.includes(getTodayISO());
 
   // ─── Day Navigation (instant cache → fallback to bulk fetch) ───
   const switchToDay = useCallback(async (newDate: string) => {
@@ -1589,17 +1593,19 @@ export default function SchedulePage({ overrideRole }: { overrideRole?: 'owner' 
         claimedTeamIds.add(matched.id);
         resolvedTeams.set(teamName, matched);
       } else {
-        const colorIdx = allTeams.length + resolvedTeams.size;
+        // Wrap by the actual palette size (8) — % 10 could index past the end
+        // and leave team.color undefined until the next DB reload.
+        const colorIdx = (allTeams.length + resolvedTeams.size) % TEAM_COLORS.length;
         const { data: newTeam } = await supabase
           .from('teams')
-          .insert({ org_id: orgId, name: teamName, color_index: colorIdx % 10, sort_order: allTeams.length + resolvedTeams.size })
+          .insert({ org_id: orgId, name: teamName, color_index: colorIdx, sort_order: allTeams.length + resolvedTeams.size })
           .select()
           .single();
         if (newTeam) {
           const t = {
             id: newTeam.id as string, name: newTeam.name as string,
-            color: (await import('@/lib/types')).TEAM_COLORS[colorIdx % 10],
-            colorIndex: colorIdx % 10,
+            color: TEAM_COLORS[colorIdx],
+            colorIndex: colorIdx,
             baseAddress: null, returnAddress: null, clients: [],
             travelSegments: new Map(), dayStartTime: '08:00', breaks: [],
             hourlyRate: 38, calculateFuel: false, fuelEfficiency: 10, fuelPrice: 1.85, perKmRate: 0,
@@ -2036,6 +2042,24 @@ export default function SchedulePage({ overrideRole }: { overrideRole?: 'owner' 
               >
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="9 18 15 12 9 6" /></svg>
               </button>
+
+              {/* This Week — jump back to the current week */}
+              {state.viewMode === 'week' && (
+                <button
+                  onClick={goToThisWeek}
+                  className={`ml-1 px-2.5 py-1 rounded-lg text-xs font-semibold transition-colors flex items-center gap-1.5 ${
+                    isCurrentWeek
+                      ? 'bg-primary-light text-primary border border-primary/20'
+                      : 'text-text-secondary border border-border-light hover:bg-surface-hover hover:text-text-primary'
+                  }`}
+                  title={isCurrentWeek ? "You're viewing the current week" : 'Jump to the current week'}
+                >
+                  <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={isCurrentWeek ? 2.5 : 2}>
+                    <rect x="3" y="4" width="18" height="18" rx="2" ry="2" /><line x1="16" y1="2" x2="16" y2="6" /><line x1="8" y1="2" x2="8" y2="6" /><line x1="3" y1="10" x2="21" y2="10" /><circle cx="12" cy="16" r="2" fill="currentColor" stroke="none" />
+                  </svg>
+                  This Week
+                </button>
+              )}
             </div>
 
             {/* Right actions */}
@@ -2080,12 +2104,25 @@ export default function SchedulePage({ overrideRole }: { overrideRole?: 'owner' 
                       }
                     }
 
-                    const blob = exportDayRosterCSV(state.teams, allStaff, state.selectedDate, tc, summaries);
+                    // Client profile "Access & Notes" for every scheduled client (savedClientId → notes)
+                    const clientNotesMap = new Map<string, string>();
+                    const savedClientIds = [...new Set(
+                      state.teams.flatMap(t => t.clients.map(c => c.savedClientId).filter((id): id is string => !!id))
+                    )];
+                    if (savedClientIds.length > 0) {
+                      const { data: clientRows } = await supabase
+                        .from('clients').select('id, notes').in('id', savedClientIds);
+                      for (const row of clientRows || []) {
+                        if (row.notes) clientNotesMap.set(row.id, row.notes);
+                      }
+                    }
+
+                    const blob = await exportDayRosterXLSX(state.teams, allStaff, state.selectedDate, tc, summaries, clientNotesMap);
                     const url = URL.createObjectURL(blob);
                     const link = document.createElement('a');
                     link.setAttribute('href', url);
                     const dayName = new Date(state.selectedDate + 'T00:00:00').toLocaleDateString('en-AU', { weekday: 'long' });
-                    link.setAttribute('download', `staff-roster-${dayName}-${state.selectedDate}.csv`);
+                    link.setAttribute('download', `staff-roster-${dayName}-${state.selectedDate}.xlsx`);
                     link.style.display = 'none';
                     document.body.appendChild(link);
                     link.click();
@@ -2208,16 +2245,25 @@ export default function SchedulePage({ overrideRole }: { overrideRole?: 'owner' 
                 </svg>
                 <span className="text-xs font-medium text-amber-800">Changes made to this week aren&apos;t published. Click <strong>Re-publish</strong> to save changes, or click <strong>Revert</strong> to discard them.</span>
               </div>
-              <button
-                onClick={handleRevertWeek}
-                className="text-xs font-semibold text-amber-900 bg-amber-100 hover:bg-amber-200 px-3 py-1.5 rounded-lg transition-colors flex items-center gap-1.5 shrink-0"
-              >
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/>
-                  <path d="M3 3v5h5"/>
-                </svg>
-                Revert
-              </button>
+              <div className="flex items-center gap-1.5 shrink-0">
+                <button
+                  onClick={handlePublishWeek}
+                  className="text-xs font-semibold text-white bg-amber-600 hover:bg-amber-700 px-3 py-1.5 rounded-lg transition-colors flex items-center gap-1.5"
+                >
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                  Re-publish
+                </button>
+                <button
+                  onClick={handleRevertWeek}
+                  className="text-xs font-semibold text-amber-900 bg-amber-100 hover:bg-amber-200 px-3 py-1.5 rounded-lg transition-colors flex items-center gap-1.5"
+                >
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/>
+                    <path d="M3 3v5h5"/>
+                  </svg>
+                  Revert
+                </button>
+              </div>
             </div>
           )}
 

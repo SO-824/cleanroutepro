@@ -30,13 +30,27 @@ interface JobInfo {
   checklist_completed?: boolean;
 }
 
+interface SegmentStaff {
+  id: string;
+  name: string;
+  isDriver: boolean;
+  isMe: boolean;
+}
+
 interface TeamSegment {
   teamName: string;
   teamColor: string;
   startTime: string | null;
   driverName: string | null;
   driverIsMe: boolean;
+  staff: SegmentStaff[];
   jobs: JobInfo[];
+  baseAddress: string | null;
+  basePlaceId: string | null;
+  baseDepartureTime: string | null;
+  returnAddress: string | null;
+  returnPlaceId: string | null;
+  returnArrivalTime: string | null;
 }
 
 interface DayData {
@@ -154,6 +168,98 @@ function DriverBanner({ driverName, driverIsMe, teamName, teamColor }: {
         </div>
       )}
     </motion.div>
+  );
+}
+
+// ─── Team Roster Card ──────────────────────────────────────────────────────────
+
+function TeamRosterCard({ staff, teamColor, teamName }: {
+  staff: SegmentStaff[]; teamColor: string; teamName?: string;
+}) {
+  if (staff.length === 0) return null;
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: -6 }}
+      animate={{ opacity: 1, y: 0 }}
+      className="bg-white rounded-2xl border border-border-light p-4"
+    >
+      <div className="flex items-center gap-2 mb-2.5">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-text-tertiary">
+          <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/>
+          <path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>
+        </svg>
+        <p className="text-[10px] font-bold text-text-tertiary uppercase tracking-widest">
+          {teamName ? `${teamName} · Team` : 'Your Team'} ({staff.length})
+        </p>
+      </div>
+      <div className="flex flex-wrap gap-2">
+        {staff.map(m => (
+          <div
+            key={m.id}
+            className={`flex items-center gap-1.5 pl-1 pr-2.5 py-1 rounded-full border ${
+              m.isMe ? 'bg-primary-light border-primary/20' : 'bg-surface-elevated border-border-light'
+            }`}
+          >
+            <div
+              className="w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold text-white shrink-0"
+              style={{ backgroundColor: teamColor }}
+            >
+              {m.name.charAt(0).toUpperCase()}
+            </div>
+            <span className={`text-xs font-semibold ${m.isMe ? 'text-primary' : 'text-text-primary'}`}>
+              {m.isMe ? 'You' : m.name}
+            </span>
+            {m.isDriver && <span className="text-[10px]" title="Driver">🚗</span>}
+          </div>
+        ))}
+      </div>
+    </motion.div>
+  );
+}
+
+// ─── Base Card (Leave Base / Return to Base) ───────────────────────────────────
+
+function BaseCard({ variant, time, address, placeId, teamColor }: {
+  variant: 'leave' | 'return'; time: string | null; address: string; placeId: string | null; teamColor: string;
+}) {
+  const isLeave = variant === 'leave';
+  return (
+    <div className="flex items-center gap-3 px-4 py-3 rounded-2xl bg-white border border-border-light" style={{ borderLeftWidth: 4, borderLeftColor: teamColor }}>
+      <div
+        className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0"
+        style={{ backgroundColor: `${teamColor}1A` }}
+      >
+        {isLeave ? (
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={teamColor} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/>
+          </svg>
+        ) : (
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={teamColor} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0z"/><circle cx="12" cy="10" r="3"/>
+          </svg>
+        )}
+      </div>
+      <div className="flex-1 min-w-0">
+        <p className="text-[10px] font-bold uppercase tracking-wider text-text-tertiary">
+          {isLeave ? 'Leave Base' : 'Return to Base'}
+        </p>
+        <p className="text-sm font-bold" style={{ color: teamColor }}>
+          {time ? formatTime(time) : isLeave ? '—' : 'After last job'}
+        </p>
+        <p className="text-xs text-text-secondary leading-snug">{address}</p>
+      </div>
+      <a
+        href={`https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(address)}${placeId ? `&destination_place_id=${placeId}` : ''}`}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="shrink-0 p-2.5 rounded-xl bg-surface-elevated border border-border-light text-text-secondary active:scale-95 transition-transform"
+        title="Navigate"
+      >
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+          <polygon points="3 11 22 2 13 21 11 13 3 11"/>
+        </svg>
+      </a>
+    </div>
   );
 }
 
@@ -367,15 +473,15 @@ export default function StaffPortalPage({ overrideStaffId, overrideStaffName }: 
 
   // ── Load staff roster ─────────────────────────────────────────────────────
   useEffect(() => {
-    if (overrideStaffId) {
-      setStaffMemberId(overrideStaffId);
-      return;
-    }
-    if (!profile?.org_id || !profile?.id) return;
+    if (overrideStaffId) setStaffMemberId(overrideStaffId);
+    if (!profile?.org_id || (!overrideStaffId && !profile?.id)) return;
     (async () => {
       const { data } = await supabase
         .from('staff_members').select('id, name, email').eq('org_id', profile.org_id);
       if (data) setAllStaff(data.map((s: { id: string; name: string }) => ({ id: s.id, name: s.name })));
+
+      // Preview mode: staff identity is supplied by the parent — roster is all we need
+      if (overrideStaffId) return;
 
       const { data: me } = await supabase
         .from('staff_members').select('id').eq('user_id', profile.id).maybeSingle();
@@ -392,7 +498,7 @@ export default function StaffPortalPage({ overrideStaffId, overrideStaffName }: 
         }
       }
     })();
-  }, [profile?.org_id, profile?.id, profile?.email, supabase]);
+  }, [profile?.org_id, profile?.id, profile?.email, supabase, overrideStaffId]);
 
   // ── Load week data ────────────────────────────────────────────────────────
   const loadWeek = useCallback(async () => {
@@ -406,7 +512,7 @@ export default function StaffPortalPage({ overrideStaffId, overrideStaffName }: 
       .eq('org_id', profile.org_id).order('sort_order');
 
     const { data: schedules } = await supabase
-      .from('schedules').select('id, schedule_date, team_id, is_published, driver_staff_id, staff_ids')
+      .from('schedules').select('id, schedule_date, team_id, is_published, driver_staff_id, staff_ids, base_departure_time, has_start_base, base_address, base_place_id, has_return_base, return_address, return_place_id, return_arrival_time')
       .eq('org_id', profile.org_id).in('schedule_date', dateStrings);
 
 
@@ -431,7 +537,12 @@ export default function StaffPortalPage({ overrideStaffId, overrideStaffName }: 
     }
 
     const days: DayData[] = weekDates.map(wd => {
-      type RawSched = { id: string; schedule_date: string; team_id: string; is_published: boolean; driver_staff_id: string | null; staff_ids: string[] | null };
+      type RawSched = {
+        id: string; schedule_date: string; team_id: string; is_published: boolean;
+        driver_staff_id: string | null; staff_ids: string[] | null;
+        base_departure_time: string | null; has_start_base: boolean | null; base_address: string | null; base_place_id: string | null;
+        has_return_base: boolean | null; return_address: string | null; return_place_id: string | null; return_arrival_time: string | null;
+      };
       const daySchedules = (schedules || []).filter((s: RawSched) => s.schedule_date === wd.date && s.is_published) as RawSched[];
 
       // ── Build per-team segments instead of merging into one flat list ──
@@ -488,13 +599,39 @@ export default function StaffPortalPage({ overrideStaffId, overrideStaffName }: 
 
         const tColor = team ? TEAM_COLORS[team.color_index % TEAM_COLORS.length] : TEAM_COLORS[0];
 
+        // Resolve full team roster for this schedule (staff_ids + driver)
+        const memberIds = new Set<string>(sched.staff_ids || []);
+        if (sched.driver_staff_id) memberIds.add(sched.driver_staff_id);
+        const segStaff: SegmentStaff[] = [...memberIds]
+          .map(id => {
+            const s = allStaff.find(st => st.id === id);
+            return s ? { id, name: s.name, isDriver: id === sched.driver_staff_id, isMe: id === staffMemberId } : null;
+          })
+          .filter((s): s is SegmentStaff => s !== null)
+          .sort((a, b) => {
+            if (a.isMe !== b.isMe) return a.isMe ? -1 : 1;
+            if (a.isDriver !== b.isDriver) return a.isDriver ? -1 : 1;
+            return a.name.localeCompare(b.name);
+          });
+
+        const hasStartBase = sched.has_start_base !== false && !!sched.base_address;
+        const hasReturnBase = sched.has_return_base !== false && !!sched.return_address;
+
         teamSegments.push({
           teamName: team?.name || 'Team',
           teamColor: tColor,
-          startTime: team?.day_start_time || null,
+          // Prefer the actual leave-base departure over the nominal team start
+          startTime: sched.base_departure_time || team?.day_start_time || null,
           driverName: segDriverName,
           driverIsMe: segDriverIsMe,
+          staff: segStaff,
           jobs: orderedJobs,
+          baseAddress: hasStartBase ? sched.base_address : null,
+          basePlaceId: hasStartBase ? sched.base_place_id : null,
+          baseDepartureTime: hasStartBase ? (sched.base_departure_time || team?.day_start_time || null) : null,
+          returnAddress: hasReturnBase ? sched.return_address : null,
+          returnPlaceId: hasReturnBase ? sched.return_place_id : null,
+          returnArrivalTime: hasReturnBase ? sched.return_arrival_time : null,
         });
 
         allOrderedJobs.push(...orderedJobs);
@@ -714,6 +851,16 @@ export default function StaffPortalPage({ overrideStaffId, overrideStaffName }: 
                     ))}
                   </div>
 
+                  {/* Team roster — who's working with you today */}
+                  {todayData.teamSegments.filter(seg => seg.staff.length > 0).map((seg, si) => (
+                    <TeamRosterCard
+                      key={`roster-${si}`}
+                      staff={seg.staff}
+                      teamColor={seg.teamColor}
+                      teamName={todayData.teamSegments.length > 1 ? seg.teamName : undefined}
+                    />
+                  ))}
+
                   {/* Divider */}
                   <div className="flex items-center gap-3 py-1">
                     <div className="flex-1 h-px bg-border-light" />
@@ -721,33 +868,64 @@ export default function StaffPortalPage({ overrideStaffId, overrideStaffName }: 
                     <div className="flex-1 h-px bg-border-light" />
                   </div>
 
-                  {/* Job cards */}
-                  {(() => {
+                  {/* Job cards — grouped by team segment with base departure/return */}
+                  {todayData.teamSegments.map((seg, segIdx) => {
                     let clientIdx = 0;
-                    return todayData.jobs.map((job, i) => {
-                      if (!job.is_break) clientIdx++;
-                      return (
-                        <JobCard
-                          key={job.id}
-                          job={job}
-                          index={job.is_break ? i : clientIdx - 1}
-                          teamColor={todayData.teamColor}
-                          onChecklist={() => setChecklistJob({
-                            clientId: job.client_id!,
-                            clientName: job.name,
-                            clientAddress: job.address,
-                            jobId: job.id,
-                            checklistId: job.checklist_id || null,
-                          })}
-                          onInfo={() => {
-                            setInfoClientId(job.client_id!);
-                            setInfoClientName(job.name);
-                            setInfoJobId(job.id);
-                          }}
-                        />
-                      );
-                    });
-                  })()}
+                    return (
+                      <div key={`tseg-${segIdx}`} className="space-y-3">
+                        {todayData.teamSegments.length > 1 && (
+                          <div className={`flex items-center gap-2 ${segIdx > 0 ? 'mt-4 pt-4 border-t border-border-light' : ''}`}>
+                            <div className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: seg.teamColor }} />
+                            <p className="text-sm font-bold text-text-primary">{seg.teamName}</p>
+                          </div>
+                        )}
+
+                        {seg.baseAddress && (
+                          <BaseCard
+                            variant="leave"
+                            time={seg.baseDepartureTime}
+                            address={seg.baseAddress}
+                            placeId={seg.basePlaceId}
+                            teamColor={seg.teamColor}
+                          />
+                        )}
+
+                        {seg.jobs.map((job, i) => {
+                          if (!job.is_break) clientIdx++;
+                          return (
+                            <JobCard
+                              key={job.id}
+                              job={job}
+                              index={job.is_break ? i : clientIdx - 1}
+                              teamColor={seg.teamColor}
+                              onChecklist={() => setChecklistJob({
+                                clientId: job.client_id!,
+                                clientName: job.name,
+                                clientAddress: job.address,
+                                jobId: job.id,
+                                checklistId: job.checklist_id || null,
+                              })}
+                              onInfo={() => {
+                                setInfoClientId(job.client_id!);
+                                setInfoClientName(job.name);
+                                setInfoJobId(job.id);
+                              }}
+                            />
+                          );
+                        })}
+
+                        {seg.returnAddress && (
+                          <BaseCard
+                            variant="return"
+                            time={seg.returnArrivalTime}
+                            address={seg.returnAddress}
+                            placeId={seg.returnPlaceId}
+                            teamColor={seg.teamColor}
+                          />
+                        )}
+                      </div>
+                    );
+                  })}
                 </div>
               )}
             </motion.div>
@@ -845,6 +1023,14 @@ export default function StaffPortalPage({ overrideStaffId, overrideStaffName }: 
                       />
                     )}
 
+                    {/* Single-team roster */}
+                    {selectedDayData.teamSegments.length === 1 && selectedDayData.teamSegments[0].staff.length > 0 && (
+                      <TeamRosterCard
+                        staff={selectedDayData.teamSegments[0].staff}
+                        teamColor={selectedDayData.teamSegments[0].teamColor}
+                      />
+                    )}
+
                     {selectedDayData.jobs.length === 0 ? (
                       <div className="flex flex-col items-center py-16 text-center">
                         <div className="text-4xl mb-3">📋</div>
@@ -882,6 +1068,20 @@ export default function StaffPortalPage({ overrideStaffId, overrideStaffName }: 
                               </div>
                             )}
 
+                            {/* Roster for this segment */}
+                            {seg.staff.length > 0 && (
+                              <div className="mt-2">
+                                <TeamRosterCard staff={seg.staff} teamColor={seg.teamColor} />
+                              </div>
+                            )}
+
+                            {/* Leave base for this segment */}
+                            {seg.baseAddress && (
+                              <div className="mt-2">
+                                <BaseCard variant="leave" time={seg.baseDepartureTime} address={seg.baseAddress} placeId={seg.basePlaceId} teamColor={seg.teamColor} />
+                              </div>
+                            )}
+
                             {/* Jobs for this segment */}
                             <div className="mt-2 space-y-3">
                               {seg.jobs.map((job, i) => {
@@ -908,36 +1108,54 @@ export default function StaffPortalPage({ overrideStaffId, overrideStaffName }: 
                                 );
                               })}
                             </div>
+
+                            {/* Return to base for this segment */}
+                            {seg.returnAddress && (
+                              <div className="mt-3">
+                                <BaseCard variant="return" time={seg.returnArrivalTime} address={seg.returnAddress} placeId={seg.returnPlaceId} teamColor={seg.teamColor} />
+                              </div>
+                            )}
                           </div>
                         );
                       })
                     ) : (
                       /* ── Single team display (original) ── */
                       (() => {
+                        const seg = selectedDayData.teamSegments[0];
                         let clientIdx = 0;
-                        return selectedDayData.jobs.map((job, i) => {
-                          if (!job.is_break) clientIdx++;
-                          return (
-                            <JobCard
-                              key={job.id}
-                              job={job}
-                              index={job.is_break ? i : clientIdx - 1}
-                              teamColor={selectedDayData.teamColor}
-                              onChecklist={() => setChecklistJob({
-                                clientId: job.client_id!,
-                                clientName: job.name,
-                                clientAddress: job.address,
-                                jobId: job.id,
-                                checklistId: job.checklist_id || null,
-                              })}
-                              onInfo={() => {
-                                setInfoClientId(job.client_id!);
-                                setInfoClientName(job.name);
-                                setInfoJobId(job.id);
-                              }}
-                            />
-                          );
-                        });
+                        return (
+                          <>
+                            {seg?.baseAddress && (
+                              <BaseCard variant="leave" time={seg.baseDepartureTime} address={seg.baseAddress} placeId={seg.basePlaceId} teamColor={seg.teamColor} />
+                            )}
+                            {selectedDayData.jobs.map((job, i) => {
+                              if (!job.is_break) clientIdx++;
+                              return (
+                                <JobCard
+                                  key={job.id}
+                                  job={job}
+                                  index={job.is_break ? i : clientIdx - 1}
+                                  teamColor={selectedDayData.teamColor}
+                                  onChecklist={() => setChecklistJob({
+                                    clientId: job.client_id!,
+                                    clientName: job.name,
+                                    clientAddress: job.address,
+                                    jobId: job.id,
+                                    checklistId: job.checklist_id || null,
+                                  })}
+                                  onInfo={() => {
+                                    setInfoClientId(job.client_id!);
+                                    setInfoClientName(job.name);
+                                    setInfoJobId(job.id);
+                                  }}
+                                />
+                              );
+                            })}
+                            {seg?.returnAddress && (
+                              <BaseCard variant="return" time={seg.returnArrivalTime} address={seg.returnAddress} placeId={seg.returnPlaceId} teamColor={seg.teamColor} />
+                            )}
+                          </>
+                        );
                       })()
                     )}
                   </motion.div>

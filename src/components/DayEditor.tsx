@@ -609,6 +609,14 @@ export default function DayEditor({ state, dispatch, orgId, dbLoaded, supabase, 
 
           const teamSummary = calculateDaySummary(team);
           const schedTimesResult = calculateScheduleTimes(team);
+          // Travel-loaded check: without travel segments the route engine
+          // collapses job times onto the day start (no travel offsets), so
+          // computed times are only trustworthy when travel data is present.
+          const travelLoaded = teamSummary.totalTravelMinutes > 0;
+          // Authoritative times recomputed at save time — state's c.startTime
+          // can be stale here (SET_CLIENT_TIMES dispatches AFTER this save
+          // effect runs, so a day-start change would otherwise save old times).
+          const timedById = new Map(schedTimesResult.clients.map(tc => [tc.id, tc]));
           const scheduleData: Record<string, unknown> = {
             org_id: orgId, team_id: team.id, schedule_date: today,
             has_start_base: team.baseAddress !== null,
@@ -641,14 +649,27 @@ export default function DayEditor({ state, dispatch, orgId, dbLoaded, supabase, 
           if (team.returnAddress === 'none') {
             scheduleData.return_address = null; scheduleData.return_lat = null;
             scheduleData.return_lng = null; scheduleData.return_place_id = null;
+            scheduleData.return_arrival_time = null;
           } else if (team.returnAddress) {
             scheduleData.return_address = team.returnAddress.address;
             scheduleData.return_lat = team.returnAddress.lat;
             scheduleData.return_lng = team.returnAddress.lng;
             scheduleData.return_place_id = team.returnAddress.placeId || null;
+            // Compute return arrival (last job end + return travel). Only save
+            // when the return segment is loaded — same guard as departure time.
+            const lastTimedClient = schedTimesResult.clients[schedTimesResult.clients.length - 1];
+            const lastClientState = team.clients[team.clients.length - 1];
+            const retSeg = lastClientState ? team.travelSegments.get(`${lastClientState.id}->base-return`) : null;
+            const lastEnd = lastTimedClient?.endTime || lastClientState?.endTime;
+            if (retSeg && !retSeg.isCalculating && lastEnd) {
+              const [eh, em] = lastEnd.split(':').map(Number);
+              const total = eh * 60 + em + retSeg.durationMinutes;
+              scheduleData.return_arrival_time = `${Math.floor(total / 60) % 24}`.padStart(2, '0') + ':' + `${total % 60}`.padStart(2, '0');
+            }
           } else {
             scheduleData.return_address = null; scheduleData.return_lat = null;
             scheduleData.return_lng = null; scheduleData.return_place_id = null;
+            scheduleData.return_arrival_time = null;
           }
 
           let scheduleId: string;
@@ -679,6 +700,20 @@ export default function DayEditor({ state, dispatch, orgId, dbLoaded, supabase, 
             }
           }
 
+          // When travel data hasn't loaded this session, freshly computed times
+          // lack travel offsets (job 1 collapses onto the day start). Preserve
+          // the previously saved times for surviving jobs instead of
+          // overwriting them with wrong ones.
+          let priorTimes: Map<string, { start: string | null; end: string | null }> | null = null;
+          if (!travelLoaded) {
+            const { data: priorRows } = await supabase
+              .from('schedule_jobs').select('id, start_time, end_time')
+              .eq('schedule_id', scheduleId).eq('is_break', false);
+            priorTimes = new Map((priorRows || []).map((r: { id: string; start_time: string | null; end_time: string | null }) =>
+              [r.id, { start: r.start_time, end: r.end_time }]
+            ));
+          }
+
           await supabase.from('schedule_jobs').delete().eq('schedule_id', scheduleId);
           // Build rows: regular clients first, then breaks
           const allRows: Record<string, unknown>[] = [
@@ -689,7 +724,8 @@ export default function DayEditor({ state, dispatch, orgId, dbLoaded, supabase, 
               lat: c.location.lat, lng: c.location.lng, place_id: c.location.placeId || null,
               duration_minutes: c.jobDurationMinutes, staff_count: c.staffCount || 1,
               is_locked: c.isLocked || false, is_break: false, notes: c.notes || '',
-              start_time: c.startTime || null, end_time: c.endTime || null,
+              start_time: (!travelLoaded && priorTimes?.get(c.id)?.start) || timedById.get(c.id)?.startTime || c.startTime || null,
+              end_time: (!travelLoaded && priorTimes?.get(c.id)?.end) || timedById.get(c.id)?.endTime || c.endTime || null,
               fixed_start_time: c.fixedStartTime || null,
               assigned_staff_ids: c.assignedStaffIds || [],
               checklist_id: c.checklistId || null,

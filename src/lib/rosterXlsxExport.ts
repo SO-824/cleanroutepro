@@ -1,5 +1,6 @@
 'use client';
 
+import ExcelJS from 'exceljs';
 import { TeamSchedule, StaffMember, DaySummary } from './types';
 import { calculateDaySummary, calculateScheduleTimes } from './routeEngine';
 
@@ -43,38 +44,66 @@ function getTeamSize(team: TeamSchedule): number {
   return n > 0 ? n : 1;
 }
 
-function escapeCsv(val: any): string {
-  const str = String(val ?? '');
-  if (str.includes(',') || str.includes('"') || str.includes('\n')) {
-    return `"${str.replace(/"/g, '""')}"`;
-  }
-  return str;
+/** '#059669' → 'FF059669' (ExcelJS ARGB) */
+function hexToArgb(hex: string): string {
+  return `FF${hex.replace('#', '').toUpperCase()}`;
 }
 
-function csvRow(vals: any[]): string {
-  return vals.map(escapeCsv).join(',');
+// ─── Styling constants ────────────────────────────────────────────────────────
+
+const FONT = 'Calibri';
+const thinBorder: Partial<ExcelJS.Borders> = {
+  top: { style: 'thin', color: { argb: 'FFD9D9D9' } },
+  bottom: { style: 'thin', color: { argb: 'FFD9D9D9' } },
+  left: { style: 'thin', color: { argb: 'FFD9D9D9' } },
+  right: { style: 'thin', color: { argb: 'FFD9D9D9' } },
+};
+
+function solidFill(argb: string): ExcelJS.FillPattern {
+  return { type: 'pattern', pattern: 'solid', fgColor: { argb } };
 }
 
-// ─── Merged All-Teams Day Roster CSV Export ───────────────────────────────────
+// ─── Merged All-Teams Day Roster XLSX Export ──────────────────────────────────
+//
+// Mirrors the layout of the old CSV export exactly (same rows, same columns,
+// same values) with one addition: a "Client Notes" column after
+// "Total Duration" holding the saved client profile's Access & Notes.
 
-export function exportDayRosterCSV(
+export async function exportDayRosterXLSX(
   teams: TeamSchedule[],
   allStaff: StaffMember[],
   date: string,
   templateCode?: string,
   summaries?: Map<string, DaySummary>,
-): Blob {
-  const lines: string[] = [];
+  /** savedClientId → clients.notes (the client profile's "Access & Notes") */
+  clientNotesMap?: Map<string, string>,
+): Promise<Blob> {
+  const workbook = new ExcelJS.Workbook();
+  const ws = workbook.addWorksheet('Roster');
   const staffMap = new Map(allStaff.map(s => [s.id, s]));
 
-  // Date + day header
+  // Columns: #, Client, Address, Job Notes / Access, Start, End, Total Duration, Client Notes
+  ws.columns = [
+    { width: 10 },
+    { width: 26 },
+    { width: 40 },
+    { width: 36 },
+    { width: 11 },
+    { width: 11 },
+    { width: 14 },
+    { width: 44 },
+  ];
+
+  // ── Date + day header ──
   if (templateCode) {
-    lines.push(csvRow([templateCode]));
+    const r = ws.addRow([templateCode]);
+    r.getCell(1).font = { name: FONT, bold: true, size: 14, color: { argb: 'FF4F46E5' } };
   }
   if (date) {
-    lines.push(csvRow([`${getDayLabel(date)} ${formatDateAU(date)}`]));
+    const r = ws.addRow([`${getDayLabel(date)} ${formatDateAU(date)}`]);
+    r.getCell(1).font = { name: FONT, bold: true, size: 12 };
   }
-  lines.push(''); // blank line
+  ws.addRow([]); // blank line
 
   // Only include teams that have clients scheduled
   const activeTeams = teams.filter(t => t.clients.length > 0);
@@ -115,6 +144,8 @@ export function exportDayRosterCSV(
 
     const teamSize = getTeamSize(team);
     const hasBase = team.baseAddress && team.baseAddress.lat !== 0;
+    const teamArgb = hexToArgb(team.color.primary);
+    const teamLightArgb = hexToArgb(team.color.light);
 
     // Resolve staff names for this team
     const teamStaffNames = (team.staffIds || [])
@@ -128,19 +159,46 @@ export function exportDayRosterCSV(
 
     // Blank separator between teams
     if (idx > 0) {
-      lines.push('');
-      lines.push('');
+      ws.addRow([]);
+      ws.addRow([]);
     }
 
-    // ── Team header row ──
-    lines.push(csvRow([team.name, 'Client', 'Address', 'Job Notes / Access', 'Start Time', 'End Time', 'Total Duration']));
+    // ── Team header row — filled with the team's colour ──
+    const headerRow = ws.addRow([team.name, 'Client', 'Address', 'Job Notes / Access', 'Start Time', 'End Time', 'Total Duration', 'Client Notes']);
+    headerRow.height = 22;
+    for (let col = 1; col <= 8; col++) {
+      const cell = headerRow.getCell(col);
+      cell.fill = solidFill(teamArgb);
+      cell.font = { name: FONT, bold: true, size: 11, color: { argb: 'FFFFFFFF' } };
+      cell.alignment = { vertical: 'middle' };
+      cell.border = thinBorder;
+    }
+
+    const styleDataRow = (row: ExcelJS.Row, opts: { fill?: string; bold?: boolean; italic?: boolean } = {}) => {
+      row.height = 18;
+      for (let col = 1; col <= 8; col++) {
+        const cell = row.getCell(col);
+        cell.font = { name: FONT, size: 11, bold: !!opts.bold, italic: !!opts.italic };
+        if (opts.fill) cell.fill = solidFill(opts.fill);
+        cell.border = thinBorder;
+        // Wrap the notes + address columns, centre the small columns
+        if (col === 3 || col === 4 || col === 8) {
+          cell.alignment = { vertical: 'top', wrapText: true };
+        } else if (col === 1 || col === 5 || col === 6 || col === 7) {
+          cell.alignment = { vertical: 'middle', horizontal: 'center' };
+        } else {
+          cell.alignment = { vertical: 'middle' };
+        }
+      }
+    };
 
     // ── Base row ──
     if (hasBase) {
       const baseAddr = cleanAddress(team.baseAddress?.address || '');
       // Use the route engine's calculated departure time (accounts for "Leave Base At" overrides)
       const { baseDepartureTime } = calculateScheduleTimes(team);
-      lines.push(csvRow(['', 'Base', baseAddr, '', baseDepartureTime, '', '']));
+      const r = ws.addRow(['', 'Base', baseAddr, '', baseDepartureTime, '', '', '']);
+      styleDataRow(r, { fill: teamLightArgb, bold: true });
     }
 
     // ── Client rows + breaks ──
@@ -154,7 +212,8 @@ export function exportDayRosterCSV(
     team.clients.forEach((c, i) => {
       const effMin = c.jobDurationMinutes / teamSize;
       const addr = cleanAddress(c.location.address);
-      lines.push(csvRow([
+      const clientNotes = (c.savedClientId && clientNotesMap?.get(c.savedClientId)) || '';
+      const r = ws.addRow([
         String(i + 1),
         c.name,
         addr,
@@ -162,7 +221,10 @@ export function exportDayRosterCSV(
         c.startTime || '',
         c.endTime || '',
         minsToHHMM(effMin),
-      ]));
+        clientNotes,
+      ]);
+      styleDataRow(r);
+      r.getCell(2).font = { name: FONT, size: 11, bold: true };
 
       // Insert breaks after this client
       const breaksAfter = breakMap.get(c.id);
@@ -177,7 +239,7 @@ export function exportDayRosterCSV(
             const m = totalMin % 60;
             breakEnd = `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}`;
           }
-          lines.push(csvRow([
+          const br = ws.addRow([
             '',
             b.label || 'Break',
             '',
@@ -185,7 +247,9 @@ export function exportDayRosterCSV(
             breakStart,
             breakEnd,
             minsToHHMM(b.durationMinutes),
-          ]));
+            '',
+          ]);
+          styleDataRow(br, { fill: 'FFFFF7E6', italic: true });
         }
       }
     });
@@ -208,30 +272,45 @@ export function exportDayRosterCSV(
       const returnAddr = typeof team.returnAddress === 'object' && team.returnAddress
         ? cleanAddress(team.returnAddress.address)
         : cleanAddress(team.baseAddress?.address || '');
-      lines.push(csvRow(['', 'Return to Base', returnAddr, '', last.endTime || '', arrivalTime, '']));
+      const r = ws.addRow(['', 'Return to Base', returnAddr, '', last.endTime || '', arrivalTime, '', '']);
+      styleDataRow(r, { fill: teamLightArgb, bold: true });
     }
 
     // ── Summary section ──
-    lines.push('');
-    lines.push(csvRow(['Summary']));
+    ws.addRow([]);
+    const summaryHeader = ws.addRow(['Summary']);
+    summaryHeader.getCell(1).font = { name: FONT, bold: true, size: 12 };
+
+    const addSummaryRow = (vals: (string | number)[]) => {
+      const r = ws.addRow(vals);
+      r.getCell(1).font = { name: FONT, bold: true, size: 11 };
+      for (let col = 2; col <= Math.max(vals.length, 2); col++) {
+        r.getCell(col).font = { name: FONT, size: 11 };
+      }
+      return r;
+    };
 
     if (teamStaffNames.length > 0) {
-      lines.push(csvRow([team.name, ...teamStaffNames]));
+      const r = addSummaryRow([team.name, ...teamStaffNames]);
+      r.getCell(1).font = { name: FONT, bold: true, size: 11, color: { argb: teamArgb } };
     }
 
     if (driverName) {
-      lines.push(csvRow(['Driver', driverName]));
+      addSummaryRow(['Driver', driverName]);
     }
 
-    lines.push(csvRow(['Total Clients', `${summary.clientCount} clients`]));
-    lines.push(csvRow(['Total Job Time', minsToHHMM(summary.totalJobMinutes), `${(summary.totalJobMinutes / 60).toFixed(2)} hrs`]));
+    addSummaryRow(['Total Clients', `${summary.clientCount} clients`]);
+    addSummaryRow(['Total Job Time', minsToHHMM(summary.totalJobMinutes), `${(summary.totalJobMinutes / 60).toFixed(2)} hrs`]);
 
     const effectiveJobMins = summary.payableMinutes - summary.totalTravelMinutes;
-    lines.push(csvRow(['Team Split', minsToHHMM(effectiveJobMins), `${(effectiveJobMins / 60).toFixed(2)} hrs`]));
-    lines.push(csvRow(['Travel', minsToHHMM(summary.totalTravelMinutes), `${(summary.totalTravelMinutes / 60).toFixed(2)} hrs`]));
-    lines.push(csvRow(['Driver Km', `${summary.totalDistanceKm.toFixed(1)} km`]));
+    addSummaryRow(['Team Split', minsToHHMM(effectiveJobMins), `${(effectiveJobMins / 60).toFixed(2)} hrs`]);
+    addSummaryRow(['Travel', minsToHHMM(summary.totalTravelMinutes), `${(summary.totalTravelMinutes / 60).toFixed(2)} hrs`]);
+    addSummaryRow(['Driver Km', `${summary.totalDistanceKm.toFixed(1)} km`]);
   }
 
-  const csvContent = lines.join('\n');
-  return new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+  const buffer = await workbook.xlsx.writeBuffer();
+  return new Blob(
+    [buffer],
+    { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }
+  );
 }

@@ -2,7 +2,7 @@
 
 import { useRef, useEffect } from 'react';
 import { DaySchedule, TeamColor, TeamSchedule } from '@/lib/types';
-import WeekDayColumn from './WeekDayColumn';
+import WeekDayColumn, { DayTeamRoster } from './WeekDayColumn';
 import { ScheduleWarning } from '@/lib/scheduleWarnings';
 
 interface WeekViewProps {
@@ -84,7 +84,32 @@ export default function WeekView({ weekDates, daySchedules, teamColor, activeDat
       className="flex gap-2 h-full overflow-x-auto custom-scrollbar p-3 lg:p-4"
     >
 
-      {weekDates.map((date) => {
+      {weekDates.map((date, dayIdx) => {
+        // First two columns: expand the roster popover rightward so the week
+        // container's overflow clipping doesn't cut it off at the left edge.
+        const rosterAlign: 'left' | 'right' = dayIdx < 2 ? 'left' : 'right';
+        // Per-team rosters for this day — powers the hover popover so shift
+        // allocations can be checked without opening each day. Built from ALL
+        // teams regardless of which team tab is active.
+        const dayRosters: DayTeamRoster[] = [];
+        if (allTeams && allTeamSchedules) {
+          for (const team of allTeams) {
+            const teamDay = allTeamSchedules.get(team.id)?.get(date);
+            if (!teamDay) continue;
+            const staffIds = teamDay.staffIds || [];
+            const driverStaffId = teamDay.driverStaffId || null;
+            // Only list teams that actually have something on this day
+            if (teamDay.clients.length === 0 && staffIds.length === 0 && !driverStaffId) continue;
+            dayRosters.push({
+              teamName: team.name,
+              color: team.color.primary,
+              staffIds,
+              driverStaffId,
+              jobCount: teamDay.clients.length,
+            });
+          }
+        }
+
         if (allTeamsMode && allTeams && allTeamSchedules) {
           // Merge all teams' clients into one DaySchedule with color + teamId info
           const mergedClients: DaySchedule['clients'] = [];
@@ -125,6 +150,8 @@ export default function WeekView({ weekDates, daySchedules, teamColor, activeDat
               clientTeamMap={clientTeamMap}
               staffNameMap={staffNameMap}
               warnings={dayWarnings?.get(date)}
+              dayRosters={dayRosters}
+              rosterAlign={rosterAlign}
             />
           );
         }
@@ -147,6 +174,8 @@ export default function WeekView({ weekDates, daySchedules, teamColor, activeDat
             onDayClick={() => onDayClick(date)}
             staffNameMap={staffNameMap}
             warnings={dayWarnings?.get(date)}
+            dayRosters={dayRosters}
+            rosterAlign={rosterAlign}
           />
         );
       })}

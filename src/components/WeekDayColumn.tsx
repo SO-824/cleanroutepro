@@ -8,6 +8,15 @@ import { DaySchedule, TeamColor, Client } from '@/lib/types';
 import { formatTimeDisplay, isToday, getShortDayLabel } from '@/lib/timeUtils';
 import { ScheduleWarning, maxWarningLevel } from '@/lib/scheduleWarnings';
 
+/** Per-team roster for one day — used by the hover popover */
+export interface DayTeamRoster {
+  teamName: string;
+  color: string;
+  staffIds: string[];
+  driverStaffId: string | null;
+  jobCount: number;
+}
+
 interface WeekDayColumnProps {
   daySchedule: DaySchedule;
   teamColor: TeamColor;
@@ -21,6 +30,108 @@ interface WeekDayColumnProps {
   staffNameMap?: Record<string, string>;
   /** Warnings for this day */
   warnings?: ScheduleWarning[];
+  /** Team rosters for this day — hover the people badge to see who's on each team */
+  dayRosters?: DayTeamRoster[];
+  /** Popover anchor side for the roster badge ('left' expands rightward) */
+  rosterAlign?: 'left' | 'right';
+}
+
+// ─── Roster badge + hover popover ─────────────────────────────────────────────
+function RosterBadge({ rosters, staffNameMap, onOpenChange, align = 'right' }: {
+  rosters: DayTeamRoster[];
+  staffNameMap?: Record<string, string>;
+  onOpenChange?: (open: boolean) => void;
+  /** Which badge edge the popover is anchored to — 'left' expands rightward
+   *  (used on the first column so the week container's overflow doesn't clip it) */
+  align?: 'left' | 'right';
+}) {
+  const [open, setOpen] = useState(false);
+  const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const toggle = (next: boolean) => {
+    setOpen(next);
+    onOpenChange?.(next);
+  };
+
+  useEffect(() => () => { if (closeTimer.current) clearTimeout(closeTimer.current); }, []);
+
+  // Unique staff count across all teams this day
+  const totalStaff = new Set(
+    rosters.flatMap(r => [...(r.driverStaffId ? [r.driverStaffId] : []), ...r.staffIds])
+  ).size;
+
+  return (
+    <div
+      className="relative"
+      onClick={e => e.stopPropagation()}
+      onMouseEnter={() => { if (closeTimer.current) clearTimeout(closeTimer.current); toggle(true); }}
+      onMouseLeave={() => { closeTimer.current = setTimeout(() => toggle(false), 150); }}
+    >
+      <button
+        onClick={() => toggle(!open)}
+        className={`flex items-center gap-1 px-1.5 py-0.5 rounded-full border transition-colors shrink-0 ${
+          open
+            ? 'bg-primary-light border-primary/25 text-primary'
+            : totalStaff > 0
+              ? 'bg-surface-elevated border-border-light text-text-secondary hover:text-primary hover:border-primary/25'
+              : 'bg-amber-50 border-amber-200 text-amber-600'
+        }`}
+        title="Who's on each team today"
+      >
+        <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+          <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/>
+          <path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>
+        </svg>
+        <span className="text-[9px] font-bold leading-none">{totalStaff}</span>
+      </button>
+
+      <AnimatePresence>
+        {open && (
+          <motion.div
+            initial={{ opacity: 0, y: -4, scale: 0.96 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: -4, scale: 0.96 }}
+            transition={{ duration: 0.14, ease: [0.16, 1, 0.3, 1] }}
+            className={`absolute ${align === 'left' ? 'left-0' : 'right-0'} top-full mt-1.5 w-60 rounded-xl border border-border-light shadow-xl p-3 space-y-2.5 bg-white`}
+            style={{ zIndex: 9999 }}
+          >
+            <p className="text-[10px] font-bold text-text-tertiary uppercase tracking-wider">Teams Today</p>
+            {rosters.map((r, i) => {
+              // Driver first, then the rest of the roster (dedup driver)
+              const memberIds = [
+                ...(r.driverStaffId ? [r.driverStaffId] : []),
+                ...r.staffIds.filter(id => id !== r.driverStaffId),
+              ];
+              const members = memberIds
+                .map(id => ({ id, name: staffNameMap?.[id], isDriver: id === r.driverStaffId }))
+                .filter((m): m is { id: string; name: string; isDriver: boolean } => !!m.name);
+              return (
+                <div key={`${r.teamName}-${i}`} className={i > 0 ? 'pt-2.5 border-t border-border-light' : ''}>
+                  <div className="flex items-center gap-1.5 mb-1">
+                    <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: r.color }} />
+                    <span className="text-[11px] font-bold text-text-primary flex-1 truncate">{r.teamName}</span>
+                    <span className="text-[9px] text-text-tertiary shrink-0">{r.jobCount} job{r.jobCount !== 1 ? 's' : ''}</span>
+                  </div>
+                  {members.length === 0 ? (
+                    <p className="text-[10px] font-semibold text-amber-600 pl-3.5">⚠ No staff assigned</p>
+                  ) : (
+                    <div className="space-y-0.5 pl-3.5">
+                      {members.map(m => (
+                        <p key={m.id} className="text-[11px] text-text-secondary leading-snug">
+                          {m.name}
+                          {m.isDriver && <span className="ml-1 text-[9px] font-semibold text-text-tertiary">🚗 Driver</span>}
+                        </p>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  );
 }
 
 // ─── Warning badge + popover ──────────────────────────────────────────────────
@@ -174,11 +285,12 @@ function DraggableJobCard({
 }
 
 // ─── Day column ───────────────────────────────────────────────────────────────
-export default function WeekDayColumn({ daySchedule, teamColor, isActive, onDayClick, clientColorMap, clientTeamMap, staffNameMap, warnings = [] }: WeekDayColumnProps) {
+export default function WeekDayColumn({ daySchedule, teamColor, isActive, onDayClick, clientColorMap, clientTeamMap, staffNameMap, warnings = [], dayRosters = [], rosterAlign = 'right' }: WeekDayColumnProps) {
   const today = isToday(daySchedule.date);
   const clients = daySchedule.clients;
   const hasJobs = clients.length > 0;
   const [warningOpen, setWarningOpen] = useState(false);
+  const [rosterOpen, setRosterOpen] = useState(false);
 
   const { isOver, setNodeRef } = useDroppable({ id: daySchedule.date });
 
@@ -192,7 +304,7 @@ export default function WeekDayColumn({ daySchedule, teamColor, isActive, onDayC
             ? 'border-primary-border bg-primary-light/30'
             : 'border-border-light bg-white hover:border-border hover:shadow-card'
       }`}
-      style={{ zIndex: warningOpen ? 50 : isOver ? 10 : 0 }}
+      style={{ zIndex: warningOpen || rosterOpen ? 50 : isOver ? 10 : 0 }}
       onClick={onDayClick}
     >
       {/* Day header */}
@@ -207,6 +319,9 @@ export default function WeekDayColumn({ daySchedule, teamColor, isActive, onDayC
             )}
           </div>
           <div className="flex items-center gap-1 shrink-0">
+            {dayRosters.length > 0 && (
+              <RosterBadge rosters={dayRosters} staffNameMap={staffNameMap} onOpenChange={setRosterOpen} align={rosterAlign} />
+            )}
             {daySchedule.isPublished && (
               <span className="w-2 h-2 rounded-full bg-success shrink-0" title="Published" />
             )}
