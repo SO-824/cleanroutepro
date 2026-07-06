@@ -77,6 +77,11 @@ export async function exportDayRosterXLSX(
   summaries?: Map<string, DaySummary>,
   /** savedClientId → clients.notes (the client profile's "Access & Notes") */
   clientNotesMap?: Map<string, string>,
+  /** teamId → saved schedule times, used as fallback when a team's live travel
+   *  segments aren't loaded (segments are only fetched for teams viewed in the
+   *  editor this session — without them the route engine collapses the base
+   *  departure onto the first job's start time) */
+  savedTimes?: Map<string, { baseDepartureTime: string | null; returnArrivalTime: string | null }>,
 ): Promise<Blob> {
   const workbook = new ExcelJS.Workbook();
   const ws = workbook.addWorksheet('Roster');
@@ -195,9 +200,18 @@ export async function exportDayRosterXLSX(
     // ── Base row ──
     if (hasBase) {
       const baseAddr = cleanAddress(team.baseAddress?.address || '');
-      // Use the route engine's calculated departure time (accounts for "Leave Base At" overrides)
+      // The route engine's departure time (accounts for "Leave Base At"
+      // overrides) is only trustworthy when the base→first-job travel segment
+      // is actually loaded; otherwise fall back to the saved departure time —
+      // the same value payroll and the staff app read.
+      const firstClient = team.clients[0];
+      const baseSeg = firstClient ? team.travelSegments.get(`base->${firstClient.id}`) : undefined;
+      const baseSegLoaded = !!baseSeg && !baseSeg.isCalculating;
       const { baseDepartureTime } = calculateScheduleTimes(team);
-      const r = ws.addRow(['', 'Base', baseAddr, '', baseDepartureTime, '', '', '']);
+      const departure = baseSegLoaded
+        ? baseDepartureTime
+        : (savedTimes?.get(team.id)?.baseDepartureTime || baseDepartureTime);
+      const r = ws.addRow(['', 'Base', baseAddr, '', departure, '', '', '']);
       styleDataRow(r, { fill: teamLightArgb, bold: true });
     }
 
@@ -267,6 +281,10 @@ export async function exportDayRosterXLSX(
         const h = Math.floor(totalMin / 60) % 24;
         const m = totalMin % 60;
         arrivalTime = `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}`;
+      }
+      // Return segment not loaded this session → use the saved arrival time
+      if (!arrivalTime) {
+        arrivalTime = savedTimes?.get(team.id)?.returnArrivalTime || '';
       }
 
       const returnAddr = typeof team.returnAddress === 'object' && team.returnAddress

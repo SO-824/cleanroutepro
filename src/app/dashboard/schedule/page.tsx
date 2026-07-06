@@ -2073,21 +2073,24 @@ export default function SchedulePage({ overrideRole }: { overrideRole?: 'owner' 
                     // Build summaries map from live state
                     const summaries = new Map(state.teams.map(t => [t.id, calculateDaySummary(t)]));
 
-                    // For teams with 0 travel/distance (route not calculated this session),
-                    // pull saved values from the database as fallback
-                    const teamsNeedingFallback = state.teams.filter(t => {
-                      const s = summaries.get(t.id);
-                      return t.clients.length > 0 && s && (s.totalTravelMinutes === 0 || s.totalDistanceKm === 0);
-                    });
-                    if (teamsNeedingFallback.length > 0 && orgId) {
-                      const teamIds = teamsNeedingFallback.map(t => t.id);
+                    // Pull saved schedule data for every team with clients:
+                    // travel/distance as summary fallback (route not calculated
+                    // this session) + authoritative base departure / return
+                    // arrival times for teams whose travel segments aren't loaded.
+                    const savedTimesMap = new Map<string, { baseDepartureTime: string | null; returnArrivalTime: string | null }>();
+                    const teamIdsWithClients = state.teams.filter(t => t.clients.length > 0).map(t => t.id);
+                    if (teamIdsWithClients.length > 0 && orgId) {
                       const { data: savedScheds } = await supabase
                         .from('schedules')
-                        .select('team_id, total_travel_minutes, total_distance_km')
+                        .select('team_id, total_travel_minutes, total_distance_km, base_departure_time, return_arrival_time')
                         .eq('schedule_date', state.selectedDate)
-                        .in('team_id', teamIds);
+                        .in('team_id', teamIdsWithClients);
                       if (savedScheds) {
                         for (const saved of savedScheds) {
+                          savedTimesMap.set(saved.team_id, {
+                            baseDepartureTime: saved.base_departure_time || null,
+                            returnArrivalTime: saved.return_arrival_time || null,
+                          });
                           const existing = summaries.get(saved.team_id);
                           if (existing) {
                             const savedTravel = saved.total_travel_minutes || 0;
@@ -2117,7 +2120,7 @@ export default function SchedulePage({ overrideRole }: { overrideRole?: 'owner' 
                       }
                     }
 
-                    const blob = await exportDayRosterXLSX(state.teams, allStaff, state.selectedDate, tc, summaries, clientNotesMap);
+                    const blob = await exportDayRosterXLSX(state.teams, allStaff, state.selectedDate, tc, summaries, clientNotesMap, savedTimesMap);
                     const url = URL.createObjectURL(blob);
                     const link = document.createElement('a');
                     link.setAttribute('href', url);
