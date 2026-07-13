@@ -218,6 +218,15 @@ export default function ChecklistsPage() {
     if (!orgId || !selectedClientId) return;
     setSaving(true);
 
+    // Setting this checklist as default must also clear the flag on the
+    // client's other checklists in the DB, not just local state — staff views
+    // fetch the default with maybeSingle() and break on duplicates.
+    if (isDefault && selectedClientId) {
+      await supabase.from('client_checklists')
+        .update({ is_default: false })
+        .eq('client_id', selectedClientId);
+    }
+
     if (selectedChecklistId === 'new') {
       const { data } = await supabase
         .from('client_checklists')
@@ -245,6 +254,27 @@ export default function ChecklistsPage() {
 
     setSaving(false);
   }, [orgId, selectedClientId, selectedChecklistId, supabase]);
+
+  const handleSetDefault = async (cl: ClientChecklist) => {
+    if (cl.is_default) return;
+    // Clear the old default first so each client only ever has one
+    await supabase.from('client_checklists')
+      .update({ is_default: false })
+      .eq('client_id', cl.client_id)
+      .neq('id', cl.id);
+    await supabase.from('client_checklists')
+      .update({ is_default: true, updated_at: new Date().toISOString() })
+      .eq('id', cl.id);
+    setAllChecklists(prev => prev.map(c =>
+      c.client_id === cl.client_id ? { ...c, is_default: c.id === cl.id } : c
+    ));
+    // Keep the open editor's default flag in sync
+    if (selectedChecklistId === cl.id) setBuilderIsDefault(true);
+    else if (selectedChecklistId && selectedChecklistId !== 'new') {
+      const open = allChecklists.find(c => c.id === selectedChecklistId);
+      if (open && open.client_id === cl.client_id) setBuilderIsDefault(false);
+    }
+  };
 
   const handleDelete = async (id: string, name: string) => {
     if (!confirm(`Delete "${name}"?`)) return;
@@ -348,7 +378,7 @@ export default function ChecklistsPage() {
                           const isActive = selectedChecklistId === cl.id;
                           return (
                             <div key={cl.id}
-                              className={`w-full flex items-center gap-2.5 pl-10 pr-3 py-2 transition-colors text-left cursor-pointer ${isActive ? 'bg-primary/10 border-r-2 border-primary' : 'hover:bg-surface-elevated'}`}
+                              className={`group w-full flex items-center gap-2.5 pl-10 pr-3 py-2 transition-colors text-left cursor-pointer ${isActive ? 'bg-primary/10 border-r-2 border-primary' : 'hover:bg-surface-elevated'}`}
                               onClick={() => selectChecklist(client.id, cl.id)}
                               onDoubleClick={(e) => { e.stopPropagation(); startRename(cl); }}
                             >
@@ -372,8 +402,16 @@ export default function ChecklistsPage() {
                                   {cl.name}
                                 </span>
                               )}
-                              {cl.is_default && (
+                              {cl.is_default ? (
                                 <span className="text-[9px] font-bold text-primary shrink-0">Default</span>
+                              ) : (
+                                <button
+                                  onClick={(e) => { e.stopPropagation(); handleSetDefault(cl); }}
+                                  className="text-[9px] font-bold text-text-tertiary hover:text-primary shrink-0 opacity-0 group-hover:opacity-100 transition-opacity px-1.5 py-0.5 rounded hover:bg-primary/10"
+                                  title="Make this the default checklist for this client"
+                                >
+                                  Set default
+                                </button>
                               )}
                             </div>
                           );

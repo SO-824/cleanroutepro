@@ -141,7 +141,8 @@ function writeTeamSection(
   });
 
   // ── Return to Base ─────────────────────────────────────────────────────────
-  if (team.clients.length > 0 && hasBase) {
+  const returnAddr = team.returnAddress === 'none' ? null : (team.returnAddress || team.baseAddress);
+  if (team.clients.length > 0 && returnAddr && returnAddr.lat !== 0) {
     const last = team.clients[team.clients.length - 1];
     const ret = team.travelSegments.get(`${last.id}->base-return`);
 
@@ -154,7 +155,7 @@ function writeTeamSection(
       arrivalTime = `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}`;
     }
 
-    const baseAddr = cleanAddress(team.baseAddress?.address || '');
+    const baseAddr = cleanAddress(returnAddr.address || '');
     const returnRow = ws.addRow(['', 'Return to Base', baseAddr, '', last.endTime || '', arrivalTime, '']);
     returnRow.eachCell((cell) => { cell.font = normalFont; });
   }

@@ -350,13 +350,13 @@ export default function ChecklistFieldInput({ field, response, onChange, orgId, 
     <div className={`space-y-2 ${response.na ? 'opacity-60' : ''}`}>
       {/* Label row */}
       <div className="flex items-start justify-between gap-2">
-        <div className="flex-1">
-          <p className="text-sm font-semibold text-text-primary leading-snug">
+        <div className="flex-1 min-w-0">
+          <p className="text-sm font-semibold text-text-primary leading-snug break-words">
             {field.label || <span className="text-text-tertiary italic">Untitled field</span>}
             {field.required && !response.na && <span className="text-red-400 ml-1 text-xs">*</span>}
           </p>
           {field.description && (
-            <p className="text-xs text-text-tertiary mt-0.5 leading-relaxed">{field.description}</p>
+            <p className="text-xs text-text-tertiary mt-0.5 leading-relaxed break-words">{field.description}</p>
           )}
         </div>
         {field.allowNA && !readOnly && (

@@ -110,7 +110,8 @@ export async function exportScheduleXLSX(
   });
 
   // ── Return to Base ────────────────────────────────────────────────────────
-  if (team.clients.length > 0 && hasBase) {
+  const returnAddr = team.returnAddress === 'none' ? null : (team.returnAddress || team.baseAddress);
+  if (team.clients.length > 0 && returnAddr && returnAddr.lat !== 0) {
     const last = team.clients[team.clients.length - 1];
     const ret = team.travelSegments.get(`${last.id}->base-return`);
     // Calculate actual arrival time at base = last client endTime + return travel
@@ -122,7 +123,7 @@ export async function exportScheduleXLSX(
       const m = totalMin % 60;
       arrivalTime = `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}`;
     }
-    const baseAddr = stripStatePostcode(team.baseAddress?.address || '');
+    const baseAddr = stripStatePostcode(returnAddr.address || '');
     ws.addRow(['', 'Return to Base', baseAddr, last.endTime || '', arrivalTime, '', '']);
   }
 

@@ -108,7 +108,7 @@ function ProgressRing({ pct, submitted, size = 36 }: { pct: number; submitted: b
 
 // ─── Checklist panel (admin read-only, live) ──────────────────────────────────
 function ChecklistPanel({
-  job, sections, completion, userNameMap, onClose, loading,
+  job, sections, completion, userNameMap, onClose, loading, onReset,
 }: {
   job: JobWithCompletion;
   sections: ChecklistSection[];
@@ -116,9 +116,12 @@ function ChecklistPanel({
   userNameMap: Map<string, string>;
   onClose: () => void;
   loading: boolean;
+  onReset: () => Promise<void>;
 }) {
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [previewType, setPreviewType] = useState<'image' | 'video'>('image');
+  const [showResetConfirm, setShowResetConfirm] = useState(false);
+  const [resetting, setResetting] = useState(false);
 
   // Build userId → {color, name} from assignedStaff first (consistent colors)
   const staffByUserId = useMemo(() => {
@@ -245,6 +248,17 @@ function ChecklistPanel({
             <span className="text-[10px] text-emerald-600 font-semibold">Live — updating in real time</span>
           </div>
         )}
+
+        {/* Reset progress */}
+        {completion && (
+          <button onClick={() => setShowResetConfirm(true)}
+            className="mt-3 flex items-center gap-1.5 text-[11px] font-semibold text-text-tertiary hover:text-rose-600 px-2 py-1 -mx-2 rounded-lg hover:bg-rose-50 transition-colors">
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+              <path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/>
+            </svg>
+            Reset progress
+          </button>
+        )}
       </div>
 
       {/* Body */}
@@ -265,7 +279,7 @@ function ChecklistPanel({
               {section.title && (
                 <div className="flex items-center gap-3 py-2">
                   <div className="flex-1 h-px bg-border" />
-                  <h4 className="text-[11px] font-bold uppercase tracking-widest text-text-secondary shrink-0 px-1">
+                  <h4 className="text-[11px] font-bold uppercase tracking-widest text-text-secondary min-w-0 break-words text-center px-1">
                     {section.title}
                   </h4>
                   <div className="flex-1 h-px bg-border" />
@@ -460,6 +474,63 @@ function ChecklistPanel({
           </div>
         )}
       </div>
+
+      {/* ── Reset progress confirmation ── */}
+      <AnimatePresence>
+        {showResetConfirm && (
+          <motion.div
+            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[60] bg-black/50 flex items-center justify-center p-6"
+            onClick={() => !resetting && setShowResetConfirm(false)}
+          >
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.95, opacity: 0 }}
+              onClick={e => e.stopPropagation()}
+              className="bg-white rounded-2xl p-5 max-w-sm w-full shadow-2xl"
+            >
+              <div className="flex items-center gap-3 mb-3">
+                <div className="w-10 h-10 rounded-xl bg-rose-50 flex items-center justify-center shrink-0">
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#E11D48" strokeWidth="2">
+                    <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+                    <line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>
+                  </svg>
+                </div>
+                <h3 className="text-sm font-bold text-text-primary">Reset checklist progress?</h3>
+              </div>
+              <p className="text-xs text-text-secondary leading-relaxed mb-1.5">
+                This permanently deletes every answer, photo and note staff have recorded
+                for <span className="font-semibold text-text-primary">{job.name}</span>.
+                The checklist goes back to blank for everyone.
+              </p>
+              <p className="text-xs font-semibold text-rose-600 mb-4">This cannot be undone.</p>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => setShowResetConfirm(false)}
+                  disabled={resetting}
+                  className="flex-1 py-2.5 rounded-xl text-xs font-bold border border-border text-text-secondary hover:bg-surface-elevated transition-colors disabled:opacity-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={async () => {
+                    setResetting(true);
+                    try {
+                      await onReset();
+                      setShowResetConfirm(false);
+                    } finally {
+                      setResetting(false);
+                    }
+                  }}
+                  disabled={resetting}
+                  className="flex-1 py-2.5 rounded-xl text-xs font-bold bg-rose-600 text-white hover:bg-rose-700 transition-colors disabled:opacity-60"
+                >
+                  {resetting ? 'Resetting…' : 'Yes, reset progress'}
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* ── Media Preview Modal ── */}
       <AnimatePresence>
@@ -809,6 +880,27 @@ export default function CompletedPage() {
     }
   }, [supabase]);
 
+  // ── Reset progress: permanently delete the job's completion record ──────────
+  // Media rows cascade via checklist_completion_media's FK.
+  const handleResetProgress = useCallback(async () => {
+    if (!selectedJob) return;
+    const { error } = await supabase
+      .from('checklist_completions')
+      .delete()
+      .eq('schedule_job_id', selectedJob.id);
+    if (error) {
+      console.error('Reset progress failed:', error.message);
+      return;
+    }
+    setLiveCompletion(null);
+    setJobs(prev => prev.map(j => j.id === selectedJob.id
+      ? { ...j, completion: null, answeredFields: 0 }
+      : j));
+    setSelectedJob(prev => prev && prev.id === selectedJob.id
+      ? { ...prev, completion: null }
+      : prev);
+  }, [selectedJob, supabase]);
+
   // ── Stats ───────────────────────────────────────────────────────────────────
   const weekStats = useMemo(() => ({
     total: jobs.length,
@@ -1136,6 +1228,7 @@ export default function CompletedPage() {
               userNameMap={userNameMap}
               onClose={handleClosePanel}
               loading={panelLoading}
+              onReset={handleResetProgress}
             />
           </>
         )}

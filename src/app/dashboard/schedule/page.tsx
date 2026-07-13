@@ -298,7 +298,15 @@ export default function SchedulePage({ overrideRole }: { overrideRole?: 'owner' 
       .eq('schedule_id', scheduleRow.id);
 
     const position = count || 0;
-    
+
+    // 3. Auto-assign the client's default checklist to the new job
+    const { data: defaultChecklist } = await supabase
+      .from('client_checklists')
+      .select('id')
+      .eq('client_id', clientData.id)
+      .eq('is_default', true)
+      .maybeSingle();
+
     const newJob = {
       id: crypto.randomUUID(),
       org_id: orgId,
@@ -317,6 +325,7 @@ export default function SchedulePage({ overrideRole }: { overrideRole?: 'owner' 
       notes: '',
       fixed_start_time: null,
       assigned_staff_ids: [],
+      checklist_id: defaultChecklist?.id || null,
     };
 
     // Optimistic UI update — show immediately before the DB round-trip
@@ -350,7 +359,7 @@ export default function SchedulePage({ overrideRole }: { overrideRole?: 'owner' 
         savedClientId: clientData.id,
         clientColor: clientData.color || undefined,
         assignedStaffIds: [],
-        checklistId: undefined,
+        checklistId: defaultChecklist?.id || undefined,
       };
       nextTeamMap.set(targetDate, { ...day, clients: [...day.clients, optimisticClient] });
       next.set(state.activeTeamId, nextTeamMap);

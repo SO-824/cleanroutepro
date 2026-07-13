@@ -5,6 +5,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { generateId } from '@/lib/timeUtils';
 import { Client, Location, ScheduleAction } from '@/lib/types';
 import { useClients, SavedClient } from '@/lib/hooks/useClients';
+import { createClient as createSupabaseClient } from '@/lib/supabase/client';
 
 interface AddClientButtonProps {
   teamId: string;
@@ -19,6 +20,7 @@ export default function AddClientButton({ teamId, teamColor, dispatch, orgId }: 
   const [isFocused, setIsFocused] = useState(false);
 
   const { clients: savedClients } = useClients(orgId ?? null);
+  const supabase = useMemo(() => createSupabaseClient(), []);
 
   const searchResults = useMemo(() => {
     if (!searchQuery.trim()) return [];
@@ -81,6 +83,19 @@ export default function AddClientButton({ teamId, teamColor, dispatch, orgId }: 
 
     dispatch({ type: 'ADD_CLIENT', teamId, client });
     reset();
+
+    // Auto-assign the client's default checklist in the background — autosave
+    // persists it with the job once the dispatch lands.
+    supabase.from('client_checklists')
+      .select('id')
+      .eq('client_id', saved.id)
+      .eq('is_default', true)
+      .maybeSingle()
+      .then(({ data }: { data: { id: string } | null }) => {
+        if (data?.id) {
+          dispatch({ type: 'UPDATE_CLIENT', teamId, clientId, updates: { checklistId: data.id } });
+        }
+      });
 
     // If the stored coordinates are missing or zero, resolve the address in the background
     // and patch the card once we have real coordinates.

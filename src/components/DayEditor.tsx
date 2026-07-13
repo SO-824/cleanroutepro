@@ -612,7 +612,13 @@ export default function DayEditor({ state, dispatch, orgId, dbLoaded, supabase, 
           // Travel-loaded check: without travel segments the route engine
           // collapses job times onto the day start (no travel offsets), so
           // computed times are only trustworthy when travel data is present.
-          const travelLoaded = teamSummary.totalTravelMinutes > 0;
+          // A day with no travel legs at all (no start base + single job)
+          // never gets segments — its computed times are exact, not
+          // "unloaded", so it must not be frozen on previously saved times.
+          const travelLegCount = (hasBaseAddress ? 1 : 0)
+            + Math.max(0, team.clients.length - 1)
+            + (hasReturnAddress && team.clients.length > 0 ? 1 : 0);
+          const travelLoaded = travelLegCount === 0 || teamSummary.totalTravelMinutes > 0;
           // Authoritative times recomputed at save time — state's c.startTime
           // can be stale here (SET_CLIENT_TIMES dispatches AFTER this save
           // effect runs, so a day-start change would otherwise save old times).
@@ -625,13 +631,17 @@ export default function DayEditor({ state, dispatch, orgId, dbLoaded, supabase, 
             driver_staff_id: team.driverStaffId || null,
             staff_ids: team.staffIds || [],
           };
-          // Only write travel/distance/departure when we have real data (> 0).
+          // Only write travel/distance when we have real data (> 0).
           // This prevents overwriting previously saved values with 0 for
           // teams whose Google Maps routes haven't loaded this session.
           if (teamSummary.totalTravelMinutes > 0) {
             scheduleData.total_travel_minutes = teamSummary.totalTravelMinutes;
-            // Only save base departure time when travel is loaded — without
-            // travel data the route engine computes an incorrect departure.
+          }
+          // Save the departure time when travel is loaded, or when the day
+          // has no start base — with no base there is no travel leg before
+          // the first job, so the computed departure (= first job's start)
+          // is exact without any travel data.
+          if (!hasBaseAddress || teamSummary.totalTravelMinutes > 0) {
             scheduleData.base_departure_time = schedTimesResult.baseDepartureTime || team.dayStartTime || null;
           }
           if (teamSummary.totalDistanceKm > 0) {
@@ -1407,7 +1417,7 @@ export default function DayEditor({ state, dispatch, orgId, dbLoaded, supabase, 
             {/* Return destination */}
             {activeTeam.clients.length > 0 && activeTeam.returnAddress !== 'none' && (
               <>
-                {activeTeam.baseAddress && (
+                {(activeTeam.returnAddress || activeTeam.baseAddress) && (
                   <TravelSegmentComponent
                     segment={getTravelSegment(activeTeam.clients[activeTeam.clients.length - 1].id, 'base-return')}
                     teamColor={activeTeam.color.primary} />

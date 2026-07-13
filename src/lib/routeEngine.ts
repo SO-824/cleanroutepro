@@ -55,12 +55,15 @@ export async function calculateAllTravel(
   if (team.clients.length === 0) return;
   // If no base, still calculate travel between consecutive clients
   const hasBase = team.baseAddress && team.baseAddress.lat !== 0;
-  // Determine return destination: custom address, base address, or none
+  // Determine return destination: custom address, base address, or none.
+  // The return leg must not depend on hasBase — a day can start without a base
+  // (has_start_base off) yet still return to base at the end.
   const returnAddr = team.returnAddress === 'none' ? null : (team.returnAddress || team.baseAddress);
+  const hasReturn = returnAddr && returnAddr.lat !== 0;
   const stops = [
     ...(hasBase ? [{ id: 'base', lat: team.baseAddress!.lat, lng: team.baseAddress!.lng }] : []),
     ...team.clients.map((c) => ({ id: c.id, lat: c.location.lat, lng: c.location.lng })),
-    ...(hasBase && returnAddr ? [{ id: 'base-return', lat: returnAddr.lat, lng: returnAddr.lng }] : []),
+    ...(hasReturn ? [{ id: 'base-return', lat: returnAddr.lat, lng: returnAddr.lng }] : []),
   ];
   if (stops.length < 2) return;
   const today = new Date();
@@ -249,8 +252,8 @@ export function getRouteWaypoints(team: TeamSchedule) {
     };
   }
 
-  // No base: route from first client to last
-  if (team.clients.length < 2) return null;
+  // No base: route from first client to last (or lone client to return address)
+  if (team.clients.length < 2 && !returnAddr) return null;
   const first = team.clients[0];
   const last = team.clients[team.clients.length - 1];
   return {
@@ -272,10 +275,11 @@ export function exportScheduleCSV(team: TeamSchedule, summary: DaySummary, staff
     const eff = c.jobDurationMinutes / getTeamSize(team);
     rows.push([String(i+1),c.name,c.location.address,c.startTime||'',c.endTime||'',`${c.jobDurationMinutes} min`,String(getTeamSize(team)),`${eff.toFixed(0)} min`,seg?String(seg.durationMinutes):'',seg?String(seg.distanceKm):'']);
   });
-  if (team.clients.length > 0 && hasBase) {
+  const csvReturnAddr = team.returnAddress === 'none' ? null : (team.returnAddress || team.baseAddress);
+  if (team.clients.length > 0 && csvReturnAddr && csvReturnAddr.lat !== 0) {
     const last = team.clients[team.clients.length-1];
     const ret = team.travelSegments.get(`${last.id}->base-return`);
-    rows.push([String(team.clients.length+1),'Return to Base',team.baseAddress?.address||'',last.endTime||'','','','','',ret?String(ret.durationMinutes):'',ret?String(ret.distanceKm):'']);
+    rows.push([String(team.clients.length+1),'Return to Base',csvReturnAddr.address||'',last.endTime||'','','','','',ret?String(ret.durationMinutes):'',ret?String(ret.distanceKm):'']);
   }
   rows.push([],['Summary']);
   if (staffNames && staffNames.length > 0) {

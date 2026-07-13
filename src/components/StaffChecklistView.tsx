@@ -59,7 +59,7 @@ function FieldCard({
       <div className="pt-2 pb-1">
         <div className="flex items-center gap-3">
           <div className="flex-1 h-px bg-border" />
-          <h3 className="text-xs font-bold uppercase tracking-widest text-text-secondary shrink-0 px-1">{field.label}</h3>
+          <h3 className="text-xs font-bold uppercase tracking-widest text-text-secondary min-w-0 break-words text-center px-1">{field.label}</h3>
           <div className="flex-1 h-px bg-border" />
         </div>
         {field.description && <p className="text-center text-xs text-text-tertiary mt-1">{field.description}</p>}
@@ -84,14 +84,17 @@ function FieldCard({
     'border-border-light'
   }`;
 
-  const Header = () => (
+  // Plain JSX value, NOT an inline component — an inline component gets a new
+  // identity every render, so React remounts the header (and its N/A button)
+  // constantly; on iOS a tap landing on a remounted node is silently dropped.
+  const header = (
     <div className="flex items-start justify-between gap-2 mb-3">
       <div className="min-w-0 flex-1">
-        <p className="text-sm font-semibold text-text-primary leading-snug">
+        <p className="text-sm font-semibold text-text-primary leading-snug break-words">
           {field.label}
           {field.required && !isNa && <span className="text-red-500 ml-1">*</span>}
         </p>
-        {field.description && <p className="text-xs text-text-tertiary mt-0.5">{field.description}</p>}
+        {field.description && <p className="text-xs text-text-tertiary mt-0.5 break-words">{field.description}</p>}
         {hasError && <p className="text-xs text-red-500 mt-1 font-medium">This field is required</p>}
       </div>
       <div className="flex items-center gap-2">
@@ -131,11 +134,11 @@ function FieldCard({
           )}
         </div>
         <div className="flex-1 min-w-0">
-          <p className={`text-sm font-semibold leading-snug ${checked ? 'text-text-primary' : 'text-text-primary'}`}>
+          <p className={`text-sm font-semibold leading-snug break-words ${checked ? 'text-text-primary' : 'text-text-primary'}`}>
             {field.label}
             {field.required && !isNa && !checked && <span className="text-red-500 ml-1">*</span>}
           </p>
-          {field.description && <p className="text-xs text-text-tertiary mt-0.5">{field.description}</p>}
+          {field.description && <p className="text-xs text-text-tertiary mt-0.5 break-words">{field.description}</p>}
           {hasError && <p className="text-xs text-red-500 mt-1 font-medium">Required</p>}
         </div>
         {field.allowNA !== false && (
@@ -151,7 +154,7 @@ function FieldCard({
   if (field.type === 'yesno') {
     return (
       <div className={wrapperCls} style={borderColor ? { borderColor } : undefined}>
-        <Header />
+        {header}
         <div className="flex gap-2">
           {(['yes', 'no'] as const).map(opt => (
             <button key={opt} onClick={() => !isNa && onChange(value === opt ? null : opt)} disabled={isNa}
@@ -177,7 +180,7 @@ function FieldCard({
     };
     return (
       <div className={wrapperCls} style={borderColor ? { borderColor } : undefined}>
-        <Header />
+        {header}
         <div className="space-y-2">
           {opts.map(opt => {
             const ticked = selected.includes(opt);
@@ -190,7 +193,7 @@ function FieldCard({
                   style={ticked && answererColor ? { backgroundColor: answererColor, borderColor: answererColor } : { borderColor: '#D1D5DB', backgroundColor: '#fff' }}>
                   {ticked && <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="3"><polyline points="20 6 9 17 4 12"/></svg>}
                 </div>
-                <span className="text-sm font-medium text-text-primary">{opt}</span>
+                <span className="text-sm font-medium text-text-primary min-w-0 break-words">{opt}</span>
               </button>
             );
           })}
@@ -208,11 +211,11 @@ function FieldCard({
     };
     return (
       <div className={wrapperCls} style={borderColor ? { borderColor } : undefined}>
-        <Header />
+        {header}
         <div className="flex flex-wrap gap-2">
           {opts.map(opt => (
             <button key={opt} onClick={() => toggle(opt)} disabled={isNa}
-              className={`px-3 py-2 rounded-xl text-sm font-medium border transition-all disabled:pointer-events-none`}
+              className={`px-3 py-2 rounded-xl text-sm font-medium border transition-all disabled:pointer-events-none max-w-full break-words`}
               style={selected.includes(opt) && answererColor ? { backgroundColor: answererColor, borderColor: answererColor, color: '#fff' } : undefined}
             >
               {selected.includes(opt) ? '✓ ' : ''}{opt}
@@ -226,9 +229,9 @@ function FieldCard({
   if (field.type === 'dropdown') {
     return (
       <div className={wrapperCls} style={borderColor ? { borderColor } : undefined}>
-        <Header />
+        {header}
         <select value={String(value || '')} onChange={e => !isNa && onChange(e.target.value)} disabled={isNa}
-          className="w-full bg-surface-elevated border border-border rounded-xl px-3 py-3 text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all disabled:opacity-50 appearance-none"
+          className="w-full bg-surface-elevated border border-border rounded-xl px-3 py-3 text-base sm:text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all disabled:opacity-50 appearance-none"
           style={{ backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%239CA3AF' stroke-width='2'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E")`, backgroundRepeat: 'no-repeat', backgroundPosition: 'right 12px center' }}>
           <option value="">Select an option...</option>
           {(field.options || []).map(o => <option key={o} value={o}>{o}</option>)}
@@ -240,10 +243,10 @@ function FieldCard({
   if (field.type === 'text') {
     return (
       <div className={wrapperCls} style={borderColor ? { borderColor } : undefined}>
-        <Header />
+        {header}
         <textarea value={String(value || '')} onChange={e => !isNa && onChange(e.target.value)} disabled={isNa}
           rows={3} placeholder="Type your response here..."
-          className="w-full bg-surface-elevated border border-border rounded-xl px-3 py-2.5 text-sm text-text-primary resize-none focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all placeholder:text-text-tertiary disabled:opacity-50" />
+          className="w-full bg-surface-elevated border border-border rounded-xl px-3 py-2.5 text-base sm:text-sm text-text-primary resize-none focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all placeholder:text-text-tertiary disabled:opacity-50" />
       </div>
     );
   }
@@ -251,9 +254,9 @@ function FieldCard({
   if (field.type === 'date') {
     return (
       <div className={wrapperCls} style={borderColor ? { borderColor } : undefined}>
-        <Header />
+        {header}
         <input type="date" value={String(value || '')} onChange={e => !isNa && onChange(e.target.value)} disabled={isNa}
-          className="w-full bg-surface-elevated border border-border rounded-xl px-3 py-3 text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all disabled:opacity-50" />
+          className="w-full bg-surface-elevated border border-border rounded-xl px-3 py-3 text-base sm:text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all disabled:opacity-50" />
       </div>
     );
   }
@@ -261,9 +264,9 @@ function FieldCard({
   if (field.type === 'time') {
     return (
       <div className={wrapperCls} style={borderColor ? { borderColor } : undefined}>
-        <Header />
+        {header}
         <input type="time" value={String(value || '')} onChange={e => !isNa && onChange(e.target.value)} disabled={isNa}
-          className="w-full bg-surface-elevated border border-border rounded-xl px-3 py-3 text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all disabled:opacity-50" />
+          className="w-full bg-surface-elevated border border-border rounded-xl px-3 py-3 text-base sm:text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all disabled:opacity-50" />
       </div>
     );
   }
@@ -273,7 +276,7 @@ function FieldCard({
     const uploadedUrls = Array.isArray(value) ? (value as string[]) : [];
     return (
       <div className={wrapperCls} style={borderColor ? { borderColor } : undefined}>
-        <Header />
+        {header}
         <label className={`flex flex-col items-center justify-center gap-2 py-5 rounded-xl border-2 border-dashed transition-all cursor-pointer ${
           isNa ? 'opacity-50 pointer-events-none' : 'border-border hover:border-primary hover:bg-primary-light/20'
         }`}>
@@ -328,6 +331,13 @@ export default function StaffChecklistView({
   const notesRef = useRef('');
   const mediaUrlsRef = useRef<MediaUrls>({});
   const currentUserIdRef = useRef<string | null>(null);
+  const orgIdRef = useRef<string | null>(null);
+
+  // Fields edited locally since the last acknowledged save (fieldId → edit ts).
+  // Realtime echoes and resume fetches must never overwrite these — the echo of
+  // an in-flight save carries a pre-tap snapshot that would revert the change.
+  const pendingFieldsRef = useRef<Map<string, number>>(new Map());
+  const notesEditTsRef = useRef(0);
 
   // ── Collaboration: user color ─────────────────────────────────────────────
   // Assign a color to the current user based on which slots are taken by remote answers
@@ -353,10 +363,10 @@ export default function StaffChecklistView({
     if (!localKey) return;
     try {
       localStorage.setItem(localKey, JSON.stringify({
-        answers: Array.from(ans.values()), notes: n, ts: Date.now(),
+        answers: Array.from(ans.values()), notes: n, ts: Date.now(), templateId,
       }));
     } catch { /* storage full */ }
-  }, [localKey]);
+  }, [localKey, templateId]);
 
   const clearDraft = useCallback(() => {
     if (localKey) { try { localStorage.removeItem(localKey); } catch { /* ignore */ } }
@@ -417,11 +427,15 @@ export default function StaffChecklistView({
 
   useEffect(() => { loadChecklist(); }, [loadChecklist]);
 
-  // ── Get current user ──────────────────────────────────────────────────────
+  // ── Get current user + org once (saves 2 network calls on every autosave) ──
   useEffect(() => {
     (async () => {
       const { data: { user } } = await supabase.auth.getUser();
-      if (user) currentUserIdRef.current = user.id;
+      if (user) {
+        currentUserIdRef.current = user.id;
+        const { data: profileData } = await supabase.from('profiles').select('org_id').eq('id', user.id).single();
+        if (profileData?.org_id) orgIdRef.current = profileData.org_id;
+      }
     })();
   }, [supabase]);
 
@@ -471,10 +485,17 @@ export default function StaffChecklistView({
           const next = new Map(prev);
           items.forEach(remoteAnswer => {
             const existing = next.get(remoteAnswer.fieldId);
-            // Accept remote answer if it was answered by someone else
-            if (!existing || remoteAnswer.completed_by !== myId) {
-              next.set(remoteAnswer.fieldId, remoteAnswer);
-            }
+            // Never clobber a field the local user edited since the last
+            // acknowledged save — the echo of an in-flight save (ours or a
+            // peer's stale whole-row write) carries a pre-edit snapshot.
+            if (pendingFieldsRef.current.has(remoteAnswer.fieldId)) return;
+            // Skip the self-echo of answers I authored
+            if (existing && remoteAnswer.completed_by === myId) return;
+            // Skip unanswered remote copies that would erase a real local
+            // answer (a peer's snapshot taken before my save landed carries
+            // value:null with no completed_by)
+            if (!remoteAnswer.completed_by && existing && (existing.completed_by || existing.value !== null)) return;
+            next.set(remoteAnswer.fieldId, remoteAnswer);
           });
           answersRef.current = next; // Keep ref in sync
           buildUserMap(next);
@@ -505,6 +526,11 @@ export default function StaffChecklistView({
           const items: FieldAnswer[] = typeof data.items === 'string' ? JSON.parse(data.items) : (data.items || []);
           if (Array.isArray(items) && items.length > 0) {
             const ansMap = new Map(items.map(a => [a.fieldId, a]));
+            // Keep anything the user answered while this fetch was in flight —
+            // a wholesale replace would silently revert those first taps
+            answersRef.current.forEach((local, fieldId) => {
+              if (pendingFieldsRef.current.has(fieldId)) ansMap.set(fieldId, local);
+            });
             setAnswers(ansMap);
             answersRef.current = ansMap;
             buildUserMap(ansMap);
@@ -521,9 +547,16 @@ export default function StaffChecklistView({
         try {
           const raw = localStorage.getItem(localKey);
           if (raw) {
-            const parsed = JSON.parse(raw) as { answers: FieldAnswer[]; notes: string };
-            if (Array.isArray(parsed.answers) && parsed.answers.length > 0) {
+            const parsed = JSON.parse(raw) as { answers: FieldAnswer[]; notes: string; templateId?: string };
+            // Discard drafts made against a different checklist (admin swapped
+            // the client's checklist) — their fieldIds don't match this form
+            if (parsed.templateId && parsed.templateId !== templateId) {
+              localStorage.removeItem(localKey);
+            } else if (Array.isArray(parsed.answers) && parsed.answers.length > 0) {
               const ansMap = new Map(parsed.answers.map(a => [a.fieldId, a]));
+              answersRef.current.forEach((local, fieldId) => {
+                if (pendingFieldsRef.current.has(fieldId)) ansMap.set(fieldId, local);
+              });
               setAnswers(ansMap);
               answersRef.current = ansMap;
               if (parsed.notes) { setNotes(parsed.notes); notesRef.current = parsed.notes; }
@@ -547,7 +580,14 @@ export default function StaffChecklistView({
         if (!active) return;
         const newRow = payload.new as Record<string, unknown>;
         if (newRow?.id) completionIdRef.current = newRow.id as string;
-        if (newRow?.notes) setNotes(newRow.notes as string);
+        // Apply remote notes only when the local user has no newer edits —
+        // the echo of our own save otherwise reverts in-flight typing (this
+        // was the "character limit that deletes text" bug)
+        if (typeof newRow?.notes === 'string' && newRow.notes !== notesRef.current
+            && !dirtyRef.current && !saveLockRef.current) {
+          setNotes(newRow.notes);
+          notesRef.current = newRow.notes;
+        }
         mergeRemoteItems(newRow?.items, userNameMap);
       })
       .subscribe();
@@ -562,14 +602,13 @@ export default function StaffChecklistView({
   // `debounce` = true for text fields (keystrokes), false for discrete fields
   const setAnswer = (fieldId: string, value: FieldAnswer['value'], debounce = false) => {
     const myId = currentUserIdRef.current;
-    setAnswers(prev => {
-      const next = new Map(prev);
-      next.set(fieldId, { ...next.get(fieldId) || { fieldId }, value, na: false, completed_by: myId || undefined });
-      answersRef.current = next; // Sync ref immediately for save
-      writeDraft(next, notesRef.current);
-      buildUserMap(next);
-      return next;
-    });
+    pendingFieldsRef.current.set(fieldId, Date.now());
+    const next = new Map(answersRef.current);
+    next.set(fieldId, { ...next.get(fieldId) || { fieldId }, value, na: false, completed_by: myId || undefined });
+    answersRef.current = next; // Sync ref immediately for save
+    setAnswers(next);
+    writeDraft(next, notesRef.current);
+    buildUserMap(next);
     setSaved(false);
     dirtyRef.current = true;
     if (debounce) {
@@ -581,15 +620,14 @@ export default function StaffChecklistView({
 
   const toggleNa = (fieldId: string) => {
     const myId = currentUserIdRef.current;
-    setAnswers(prev => {
-      const next = new Map(prev);
-      const cur = next.get(fieldId) || { fieldId, value: null };
-      next.set(fieldId, { ...cur, na: !cur.na, value: !cur.na ? null : cur.value, completed_by: myId || undefined });
-      answersRef.current = next; // Sync ref immediately for save
-      writeDraft(next, notesRef.current);
-      buildUserMap(next);
-      return next;
-    });
+    pendingFieldsRef.current.set(fieldId, Date.now());
+    const next = new Map(answersRef.current);
+    const cur = next.get(fieldId) || { fieldId, value: null };
+    next.set(fieldId, { ...cur, na: !cur.na, value: !cur.na ? null : cur.value, completed_by: myId || undefined });
+    answersRef.current = next; // Sync ref immediately for save
+    setAnswers(next);
+    writeDraft(next, notesRef.current);
+    buildUserMap(next);
     setSaved(false);
     dirtyRef.current = true;
     saveNow();
@@ -610,6 +648,7 @@ export default function StaffChecklistView({
       }
     }
     if (uploaded.length > 0) {
+      pendingFieldsRef.current.set(fieldId, Date.now());
       setMediaUrls(prev => {
         const next = { ...prev, [fieldId]: [...(prev[fieldId] || []), ...uploaded] };
         mediaUrlsRef.current = next; // Sync ref immediately for save
@@ -679,24 +718,36 @@ export default function StaffChecklistView({
     saveLockRef.current = true;
     pendingSaveRef.current = false;
     setSaving(true);
+    const saveStartTs = Date.now();
     try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) { setSaving(false); saveLockRef.current = false; return; }
-      const { data: profileData } = await supabase.from('profiles').select('org_id').eq('id', user.id).single();
-      if (!profileData?.org_id) { setSaving(false); saveLockRef.current = false; return; }
+      // Identity is cached on mount — only fetch if the cache isn't ready yet
+      let userId = currentUserIdRef.current;
+      if (!userId) {
+        const { data: { user } } = await supabase.auth.getUser();
+        userId = user?.id || null;
+        if (userId) currentUserIdRef.current = userId;
+      }
+      if (!userId) { setSaving(false); saveLockRef.current = false; return; }
+      let orgId = orgIdRef.current;
+      if (!orgId) {
+        const { data: profileData } = await supabase.from('profiles').select('org_id').eq('id', userId).single();
+        orgId = profileData?.org_id || null;
+        if (orgId) orgIdRef.current = orgId;
+      }
+      if (!orgId) { setSaving(false); saveLockRef.current = false; return; }
       // Read from refs (not React state) to get the LATEST values
       const answersArr = Array.from(answersRef.current.values());
       const now = new Date().toISOString();
 
       const payload = {
-        org_id: profileData.org_id,
+        org_id: orgId,
         client_id: clientId,
         schedule_job_id: scheduleJobId || null,
         checklist_template_id: templateId,
         items: JSON.stringify(answersArr),
         media_urls: mediaUrlsRef.current,
         notes: notesRef.current,
-        completed_by: user.id,
+        completed_by: userId,
         completed_at: now,
         status: isFinal ? 'submitted' : 'in_progress',
         submitted_at: isFinal ? now : null,
@@ -704,6 +755,7 @@ export default function StaffChecklistView({
 
       // Use completionIdRef to avoid a query race between autosave and submit
       const existingId = completionIdRef.current;
+      let saveError: { message?: string } | null = null;
 
       if (existingId) {
         // Row already exists — update it
@@ -714,15 +766,18 @@ export default function StaffChecklistView({
             .from('checklist_completions').select('status').eq('id', existingId).single();
           if (current?.status === 'submitted') {
             // Only update content, not status
-            await supabase.from('checklist_completions').update({
+            const { error } = await supabase.from('checklist_completions').update({
               items: payload.items, notes: payload.notes, media_urls: payload.media_urls,
             }).eq('id', existingId);
+            saveError = error;
           } else {
-            await supabase.from('checklist_completions').update(payload).eq('id', existingId);
+            const { error } = await supabase.from('checklist_completions').update(payload).eq('id', existingId);
+            saveError = error;
           }
         } else {
           // Final submit — always set submitted
-          await supabase.from('checklist_completions').update(payload).eq('id', existingId);
+          const { error } = await supabase.from('checklist_completions').update(payload).eq('id', existingId);
+          saveError = error;
         }
       } else if (scheduleJobId) {
         // No known row — check DB once (first save for this job)
@@ -731,19 +786,33 @@ export default function StaffChecklistView({
           .eq('schedule_job_id', scheduleJobId).maybeSingle();
         if (existing) {
           completionIdRef.current = existing.id;
-          await supabase.from('checklist_completions').update(payload).eq('id', existing.id);
+          const { error } = await supabase.from('checklist_completions').update(payload).eq('id', existing.id);
+          saveError = error;
         } else {
-          const { data: ins } = await supabase.from('checklist_completions')
+          const { data: ins, error } = await supabase.from('checklist_completions')
             .insert(payload).select('id').single();
           if (ins) completionIdRef.current = ins.id;
+          saveError = error;
         }
       } else {
         // No scheduleJobId, no existing row — insert
-        const { data: ins } = await supabase.from('checklist_completions')
+        const { data: ins, error } = await supabase.from('checklist_completions')
           .insert(payload).select('id').single();
         if (ins) completionIdRef.current = ins.id;
+        saveError = error;
       }
-      dirtyRef.current = false;
+
+      if (saveError) {
+        // Keep dirty + pending so the change isn't lost — the next save retries
+        console.error('Checklist save failed:', saveError.message || saveError);
+      } else {
+        // Un-mark only fields whose last edit predates this save's snapshot —
+        // fields tapped mid-save stay protected from the upcoming echo
+        pendingFieldsRef.current.forEach((ts, fieldId) => {
+          if (ts <= saveStartTs) pendingFieldsRef.current.delete(fieldId);
+        });
+        dirtyRef.current = pendingFieldsRef.current.size > 0 || notesEditTsRef.current > saveStartTs;
+      }
     } catch (err) {
       console.error('Checklist save error:', err);
     }
@@ -778,6 +847,13 @@ export default function StaffChecklistView({
     if (errs.size > 0) {
       document.getElementById(`field-${[...errs][0]}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
       return;
+    }
+    // Wait for any in-flight autosave to release the lock — a final save
+    // bypasses it, and interleaving with an autosave can downgrade the
+    // just-submitted status back to in_progress
+    const waitStart = Date.now();
+    while (saveLockRef.current && Date.now() - waitStart < 5000) {
+      await new Promise(r => setTimeout(r, 100));
     }
     await performSave(true);
   };
@@ -838,7 +914,7 @@ export default function StaffChecklistView({
   // ── Render ────────────────────────────────────────────────────────────────
   return (
     <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-      className="fixed inset-0 z-50 flex flex-col bg-[#f5f6fa]" onClick={onClose}>
+      className="fixed inset-0 z-50 flex flex-col bg-[#f5f6fa]">
       <motion.div initial={{ y: '100%' }} animate={{ y: 0 }} exit={{ y: '100%' }}
         transition={{ type: 'spring', damping: 32, stiffness: 320 }}
         onClick={e => e.stopPropagation()}
@@ -896,8 +972,9 @@ export default function StaffChecklistView({
           )}
         </div>
 
-        {/* Scrollable body */}
-        <div className="flex-1 overflow-y-auto">
+        {/* Scrollable body — overflow-x-hidden: overflow-y alone computes
+            overflow-x to auto, letting any over-wide child pan the whole form */}
+        <div className="flex-1 overflow-y-auto overflow-x-hidden">
           {loading ? (
             <div className="p-4 space-y-3">{[1,2,3,4,5].map(i => <div key={i} className="shimmer h-24 rounded-2xl" />)}</div>
           ) : sections.length === 0 ? (
@@ -949,7 +1026,7 @@ export default function StaffChecklistView({
                   {section.title && (
                     <div className="flex items-center gap-3 py-2">
                       <div className="flex-1 h-px bg-border" />
-                      <h3 className="text-xs font-bold uppercase tracking-widest text-text-secondary shrink-0 px-1">{section.title}</h3>
+                      <h3 className="text-xs font-bold uppercase tracking-widest text-text-secondary min-w-0 break-words text-center px-1">{section.title}</h3>
                       <div className="flex-1 h-px bg-border" />
                     </div>
                   )}
@@ -983,9 +1060,9 @@ export default function StaffChecklistView({
               <div className="rounded-2xl border-2 border-border-light bg-white p-4">
                 <p className="text-sm font-semibold text-text-primary mb-2">Additional notes</p>
                 <textarea value={notes}
-                  onChange={e => { const n = e.target.value; setNotes(n); notesRef.current = n; writeDraft(answersRef.current, n); setSaved(false); dirtyRef.current = true; scheduleDebouncedSave(); }}
+                  onChange={e => { const n = e.target.value; setNotes(n); notesRef.current = n; notesEditTsRef.current = Date.now(); writeDraft(answersRef.current, n); setSaved(false); dirtyRef.current = true; scheduleDebouncedSave(); }}
                   rows={3} placeholder="Any extra notes for this job..."
-                  className="w-full bg-surface-elevated border border-border rounded-xl px-3 py-2.5 text-sm text-text-primary resize-none focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all placeholder:text-text-tertiary" />
+                  className="w-full bg-surface-elevated border border-border rounded-xl px-3 py-2.5 text-base sm:text-sm text-text-primary resize-none focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all placeholder:text-text-tertiary" />
               </div>
             </div>
           )}
@@ -997,7 +1074,9 @@ export default function StaffChecklistView({
             {errors.size > 0 && (
               <p className="text-xs text-red-500 font-medium text-center mb-2">Please complete all required fields before submitting.</p>
             )}
-            <button onClick={handleSubmit} disabled={saving || uploading}
+            {/* Not disabled while saving — autosaves run after every tap, and a
+                pointer-events-none button silently swallows the Submit tap */}
+            <button onClick={handleSubmit} disabled={uploading}
               className={`w-full py-4 rounded-2xl font-bold text-base transition-all active:scale-[0.98] shadow-sm ${
                 allAnswered ? 'bg-emerald-500 text-white' : 'bg-primary text-white'
               } disabled:opacity-60 disabled:pointer-events-none`}>

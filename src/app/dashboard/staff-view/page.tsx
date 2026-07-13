@@ -246,7 +246,7 @@ function BaseCard({ variant, time, address, placeId, teamColor }: {
         <p className="text-sm font-bold" style={{ color: teamColor }}>
           {time ? formatTime(time) : isLeave ? '—' : 'After last job'}
         </p>
-        <p className="text-xs text-text-secondary leading-snug">{address}</p>
+        <p className="text-xs text-text-secondary leading-snug break-words">{address}</p>
       </div>
       <a
         href={`https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(address)}${placeId ? `&destination_place_id=${placeId}` : ''}`}
@@ -361,7 +361,7 @@ function JobCard({
         {/* Notes */}
         {job.notes && (
           <div className="mb-3 px-3 py-2.5 bg-surface-elevated rounded-xl">
-            <p className="text-xs text-text-secondary leading-relaxed">{job.notes}</p>
+            <p className="text-xs text-text-secondary leading-relaxed break-words">{job.notes}</p>
           </div>
         )}
 
@@ -758,7 +758,7 @@ export default function StaffPortalPage({ overrideStaffId, overrideStaffName }: 
       )}
 
       {/* ── Scrollable content area ─────────────────────────────────────── */}
-      <div className="flex-1 min-h-0 overflow-y-auto custom-scrollbar">
+      <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden custom-scrollbar">
         <AnimatePresence mode="wait">
 
           {/* ═════════════════════ TODAY TAB ═════════════════════════════ */}

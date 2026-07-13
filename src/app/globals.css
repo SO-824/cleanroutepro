@@ -101,3 +101,16 @@ body { font-family: var(--font-inter), system-ui, -apple-system, sans-serif; bac
 /* ── Prevent text size adjustment on iOS rotation ─────────────────────────── */
 html { -webkit-text-size-adjust: 100%; }
 
+/* ── Mobile touch fixes ─────────────────────────────────────────────────────
+   touch-action: manipulation removes the double-tap-to-zoom gesture from
+   interactive elements, so rapid successive taps register as taps instead of
+   being eaten as a zoom attempt. Panning and pinch-zoom still work. */
+button, [role="button"], a, label, select, input, textarea { touch-action: manipulation; }
+
+/* iOS Safari auto-zooms the page when a focused form control's font-size is
+   under 16px — the zoomed page can then be panned side-to-side. Keep inputs
+   at 16px on phones to prevent it. */
+@media (max-width: 640px) {
+  .input-field { font-size: 16px; }
+}
+

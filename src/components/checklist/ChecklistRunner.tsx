@@ -229,7 +229,7 @@ export default function ChecklistRunner({
       </AnimatePresence>
 
       {/* ── Sections ─────────────────────────────────────────────────────────── */}
-      <div className="flex-1 overflow-y-auto custom-scrollbar p-4 space-y-6 pb-4">
+      <div className="flex-1 overflow-y-auto overflow-x-hidden custom-scrollbar p-4 space-y-6 pb-4">
         {sections.map(sec => {
           const visibleSectionFields = sec.fields.filter(f =>
             f.type !== 'logic' && visibilityMap[f.id] !== false
@@ -262,7 +262,7 @@ export default function ChecklistRunner({
                     return (
                       <div key={field.id} className="pt-2 pb-1">
                         <div className="flex items-center gap-3">
-                          <h3 className="text-xs font-black text-text-secondary uppercase tracking-widest whitespace-nowrap">
+                          <h3 className="text-xs font-black text-text-secondary uppercase tracking-widest min-w-0 break-words">
                             {field.label || 'Section'}
                           </h3>
                           <div className="flex-1 h-px bg-border-light"/>
