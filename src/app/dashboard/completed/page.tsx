@@ -5,7 +5,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { createClient } from '@/lib/supabase/client';
 import { useAuth } from '@/lib/hooks/useAuth';
 import { getTodayISO, getWeekDates, getWeekLabel, getShortDayLabel } from '@/lib/timeUtils';
-import { ChecklistSection, migrateOldSection } from '@/components/checklist/types';
+import { ChecklistSection, migrateOldSection, buildVisibilityMap } from '@/components/checklist/types';
 import { COLLAB_COLORS } from '@/components/StaffChecklistView';
 
 const STAFF_COLORS = COLLAB_COLORS.map((c: { bg: string; text: string }) => c.bg);
@@ -155,9 +155,20 @@ function ChecklistPanel({
     return m;
   }, [completion]);
 
+  // Conditional logic: hide the same fields the staff form hid, so they don't
+  // show as "Not answered" and don't count toward the progress ring
+  const visibilityMap = useMemo(() => {
+    const responses = (completion?.items || []).map(a => ({
+      field_id: a.fieldId, value: a.value, na: !!a.na,
+    }));
+    return buildVisibilityMap(sections.flatMap(s => s.fields), responses);
+  }, [sections, completion]);
+
   const allFields = useMemo(() =>
-    sections.flatMap(s => s.fields.filter(f => f.type !== 'heading' && f.type !== 'paragraph' && f.type !== 'logic')),
-  [sections]);
+    sections.flatMap(s => s.fields.filter(f =>
+      f.type !== 'heading' && f.type !== 'paragraph' && f.type !== 'logic' && visibilityMap[f.id] !== false
+    )),
+  [sections, visibilityMap]);
 
   const answeredCount = useMemo(() => countAnswered(completion?.items || []), [completion]);
   const pct = allFields.length > 0 ? Math.round((answeredCount / allFields.length) * 100) : 0;
@@ -293,6 +304,7 @@ function ChecklistPanel({
                     </p>
                   );
                   if (field.type === 'paragraph' || field.type === 'logic') return null;
+                  if (visibilityMap[field.id] === false) return null;
 
                   const ans = answers.get(field.id);
                   const answererColor = getColor(ans?.completed_by);

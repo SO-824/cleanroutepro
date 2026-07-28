@@ -325,11 +325,17 @@ export default function PayrollPage() {
         }
       }
 
-      // Calculate pure travel time from gaps as a fallback
+      // Calculate pure travel time from gaps as a fallback.
+      // Anchor at the day's actual departure (base_departure_time, already
+      // min'd with the first job start above) — NOT the team's nominal
+      // day_start_time, which fabricates hours of "travel" on days that
+      // start later at the first job (e.g. no start base + pinned start).
       let travelMinutes = 0;
       let lastEndTracker = 0;
-      
-      if (primaryTeamId && teams[primaryTeamId]?.dayStartTime) {
+
+      if (firstStart) {
+        lastEndTracker = parseTimeToMinutes(firstStart);
+      } else if (primaryTeamId && teams[primaryTeamId]?.dayStartTime) {
          lastEndTracker = parseTimeToMinutes(teams[primaryTeamId].dayStartTime!);
       }
 

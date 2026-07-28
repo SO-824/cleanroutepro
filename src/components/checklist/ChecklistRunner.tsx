@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { ChecklistSection, ChecklistField, FieldResponse, PreFillMeta, LogicCondition } from './types';
+import { ChecklistSection, ChecklistField, FieldResponse, PreFillMeta, buildVisibilityMap } from './types';
 import ChecklistFieldInput from './ChecklistFieldInput';
 
 interface ChecklistRunnerProps {
@@ -21,79 +21,8 @@ interface ChecklistRunnerProps {
 }
 
 // ─── Logic engine ─────────────────────────────────────────────────────────────
-
-function evalCondition(cond: LogicCondition, responses: FieldResponse[]): boolean {
-  const raw = responses.find(r => r.field_id === cond.fieldId)?.value ?? null;
-  switch (cond.operator) {
-    case 'is_answered':
-      return raw !== null && raw !== '' && !(Array.isArray(raw) && raw.length === 0);
-    case 'is_empty':
-      return raw === null || raw === '' || (Array.isArray(raw) && raw.length === 0);
-    case 'equals':
-    case 'not_equals': {
-      let s: string | null = null;
-      if (typeof raw === 'string') s = raw;
-      else if (typeof raw === 'boolean') s = raw ? 'yes' : 'no';
-      else if (Array.isArray(raw)) s = raw[0] ?? null;
-      const match = s === cond.value;
-      return cond.operator === 'equals' ? match : !match;
-    }
-    case 'contains':
-      if (Array.isArray(raw)) return raw.includes(cond.value ?? '');
-      if (typeof raw === 'string') return raw.toLowerCase().includes((cond.value ?? '').toLowerCase());
-      return false;
-    default: return false;
-  }
-}
-
-/** Build a map of fieldId → visible for all non-logic fields */
-function buildVisibilityMap(
-  allFields: ChecklistField[],
-  responses: FieldResponse[]
-): Record<string, boolean> {
-  const logicBlocks = allFields.filter(
-    f => f.type === 'logic' && (f.logicConditions?.length ?? 0) > 0 && (f.logicTargets?.length ?? 0) > 0
-  );
-
-  // Fields targeted by a 'show' action are hidden by default
-  const hiddenByDefault = new Set<string>();
-  for (const lb of logicBlocks) {
-    if (lb.logicAction === 'show') lb.logicTargets!.forEach(id => hiddenByDefault.add(id));
-  }
-
-  const map: Record<string, boolean> = {};
-
-  for (const field of allFields) {
-    if (field.type === 'logic') continue;
-
-    // ── Legacy conditionalOn (keep working) ─────────────────────────────
-    if (field.conditionalOn && !hiddenByDefault.has(field.id) && logicBlocks.every(lb => !lb.logicTargets?.includes(field.id))) {
-      const parentResp = responses.find(r => r.field_id === field.conditionalOn);
-      if (!parentResp) { map[field.id] = false; continue; }
-      map[field.id] = parentResp.value === field.conditionalValue;
-      continue;
-    }
-
-    // ── New logic system ─────────────────────────────────────────────────
-    let visible = !hiddenByDefault.has(field.id);
-
-    for (const lb of logicBlocks) {
-      if (!lb.logicTargets?.includes(field.id)) continue;
-      const conds = lb.logicConditions ?? [];
-      const op = lb.logicOperator ?? 'and';
-      const met = op === 'and'
-        ? conds.every(c => evalCondition(c, responses))
-        : conds.some(c => evalCondition(c, responses));
-
-      if (lb.logicAction === 'show' && met) visible = true;
-      if (lb.logicAction === 'hide' && met) visible = false;
-    }
-
-    map[field.id] = visible;
-  }
-
-  return map;
-}
+// evalLogicCondition / buildVisibilityMap live in ./types so the staff mobile
+// form and the admin Completed panel share the exact same visibility rules.
 
 // Get or create a FieldResponse for a field
 function ensureResponse(responses: FieldResponse[], fieldId: string): FieldResponse {

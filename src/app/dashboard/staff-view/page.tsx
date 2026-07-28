@@ -418,6 +418,10 @@ export default function StaffPortalPage({ overrideStaffId, overrideStaffName }: 
   const { profile } = useAuth();
   const supabase = useMemo(() => createClient(), []);
   const isPreview = !!overrideStaffId;
+  // Owners/admins/supervisors on mobile see the FULL published schedule
+  // (read-only, all teams) — not just jobs assigned to their own staff record.
+  // Without this, an owner with no staff record would load forever.
+  const isAdminView = !isPreview && !!profile?.role && profile.role !== 'staff';
 
   const [activeTab, setActiveTab] = useState<Tab>('today');
   const [weekOffset, setWeekOffset] = useState(0);
@@ -502,7 +506,7 @@ export default function StaffPortalPage({ overrideStaffId, overrideStaffName }: 
 
   // ── Load week data ────────────────────────────────────────────────────────
   const loadWeek = useCallback(async () => {
-    if (!profile?.org_id || weekDates.length === 0 || !staffMemberId) return;
+    if (!profile?.org_id || weekDates.length === 0 || (!staffMemberId && !isAdminView)) return;
     setLoading(true);
 
     const dateStrings = weekDates.map(d => d.date);
@@ -552,9 +556,10 @@ export default function StaffPortalPage({ overrideStaffId, overrideStaffName }: 
       for (const sched of daySchedules) {
         type RawTeam = { id: string; name: string; color_index: number; day_start_time: string };
         const team = (teams || []).find((t: RawTeam) => t.id === sched.team_id) as RawTeam | undefined;
-        const isDayStaff = (sched.staff_ids || []).includes(staffMemberId!) || sched.driver_staff_id === staffMemberId!;
+        const isDayStaff = !!staffMemberId && ((sched.staff_ids || []).includes(staffMemberId) || sched.driver_staff_id === staffMemberId);
+        // Admins see every job on the published schedule; staff only theirs
         const myJobs = allJobs
-          .filter(j => j.schedule_id === sched.id && ((j.assigned_staff_ids || []).includes(staffMemberId!) || isDayStaff))
+          .filter(j => j.schedule_id === sched.id && (isAdminView || (j.assigned_staff_ids || []).includes(staffMemberId!) || isDayStaff))
           .map(j => ({ ...j, checklist_completed: completionMap.has(j.id) }));
 
         if (myJobs.length === 0) continue;
@@ -664,7 +669,7 @@ export default function StaffPortalPage({ overrideStaffId, overrideStaffName }: 
 
     setWeekData(days);
     setLoading(false);
-  }, [profile?.org_id, supabase, weekDates, staffMemberId, allStaff]);
+  }, [profile?.org_id, supabase, weekDates, staffMemberId, allStaff, isAdminView]);
 
   useEffect(() => { loadWeek(); }, [loadWeek]);
 
@@ -777,6 +782,14 @@ export default function StaffPortalPage({ overrideStaffId, overrideStaffName }: 
                 </p>
                 {!isPreview && (
                   <h1 className="text-3xl font-extrabold text-text-primary mt-1 tracking-tight">Today</h1>
+                )}
+                {isAdminView && (
+                  <span className="inline-flex items-center gap-1.5 mt-2 text-[11px] font-semibold text-primary bg-primary-light px-2.5 py-1 rounded-full">
+                    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                      <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/>
+                    </svg>
+                    Full schedule — view only
+                  </span>
                 )}
               </div>
 

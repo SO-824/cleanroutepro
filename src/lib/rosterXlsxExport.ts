@@ -3,6 +3,7 @@
 import ExcelJS from 'exceljs';
 import { TeamSchedule, StaffMember, DaySummary } from './types';
 import { calculateDaySummary, calculateScheduleTimes } from './routeEngine';
+import { formatTimeDisplay } from './timeUtils';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -65,9 +66,9 @@ function solidFill(argb: string): ExcelJS.FillPattern {
 
 // ─── Merged All-Teams Day Roster XLSX Export ──────────────────────────────────
 //
-// Mirrors the layout of the old CSV export exactly (same rows, same columns,
-// same values) with one addition: a "Client Notes" column after
-// "Total Duration" holding the saved client profile's Access & Notes.
+// Mirrors the layout of the old CSV export with one change: the per-job
+// notes column was dropped (it duplicated a legacy field) — the single
+// "Access & Notes" column holds the client profile's Access & Notes.
 
 export async function exportDayRosterXLSX(
   teams: TeamSchedule[],
@@ -87,16 +88,15 @@ export async function exportDayRosterXLSX(
   const ws = workbook.addWorksheet('Roster');
   const staffMap = new Map(allStaff.map(s => [s.id, s]));
 
-  // Columns: #, Client, Address, Job Notes / Access, Start, End, Total Duration, Client Notes
+  // Columns: #, Client, Address, Start, End, Total Duration, Access & Notes
   ws.columns = [
     { width: 10 },
     { width: 26 },
     { width: 40 },
-    { width: 36 },
     { width: 11 },
     { width: 11 },
     { width: 14 },
-    { width: 44 },
+    { width: 48 },
   ];
 
   // ── Date + day header ──
@@ -169,9 +169,9 @@ export async function exportDayRosterXLSX(
     }
 
     // ── Team header row — filled with the team's colour ──
-    const headerRow = ws.addRow([team.name, 'Client', 'Address', 'Job Notes / Access', 'Start Time', 'End Time', 'Total Duration', 'Client Notes']);
+    const headerRow = ws.addRow([team.name, 'Client', 'Address', 'Start Time', 'End Time', 'Total Duration', 'Access & Notes']);
     headerRow.height = 22;
-    for (let col = 1; col <= 8; col++) {
+    for (let col = 1; col <= 7; col++) {
       const cell = headerRow.getCell(col);
       cell.fill = solidFill(teamArgb);
       cell.font = { name: FONT, bold: true, size: 11, color: { argb: 'FFFFFFFF' } };
@@ -181,15 +181,15 @@ export async function exportDayRosterXLSX(
 
     const styleDataRow = (row: ExcelJS.Row, opts: { fill?: string; bold?: boolean; italic?: boolean } = {}) => {
       row.height = 18;
-      for (let col = 1; col <= 8; col++) {
+      for (let col = 1; col <= 7; col++) {
         const cell = row.getCell(col);
         cell.font = { name: FONT, size: 11, bold: !!opts.bold, italic: !!opts.italic };
         if (opts.fill) cell.fill = solidFill(opts.fill);
         cell.border = thinBorder;
-        // Wrap the notes + address columns, centre the small columns
-        if (col === 3 || col === 4 || col === 8) {
+        // Wrap the address + notes columns, centre the small columns
+        if (col === 3 || col === 7) {
           cell.alignment = { vertical: 'top', wrapText: true };
-        } else if (col === 1 || col === 5 || col === 6 || col === 7) {
+        } else if (col === 1 || col === 4 || col === 5 || col === 6) {
           cell.alignment = { vertical: 'middle', horizontal: 'center' };
         } else {
           cell.alignment = { vertical: 'middle' };
@@ -211,7 +211,7 @@ export async function exportDayRosterXLSX(
       const departure = baseSegLoaded
         ? baseDepartureTime
         : (savedTimes?.get(team.id)?.baseDepartureTime || baseDepartureTime);
-      const r = ws.addRow(['', 'Base', baseAddr, '', departure, '', '', '']);
+      const r = ws.addRow(['', 'Base', baseAddr, formatTimeDisplay(departure || ''), '', '', '']);
       styleDataRow(r, { fill: teamLightArgb, bold: true });
     }
 
@@ -231,9 +231,8 @@ export async function exportDayRosterXLSX(
         String(i + 1),
         c.name,
         addr,
-        c.notes || '',
-        c.startTime || '',
-        c.endTime || '',
+        formatTimeDisplay(c.startTime || ''),
+        formatTimeDisplay(c.endTime || ''),
         minsToHHMM(effMin),
         clientNotes,
       ]);
@@ -257,9 +256,8 @@ export async function exportDayRosterXLSX(
             '',
             b.label || 'Break',
             '',
-            '',
-            breakStart,
-            breakEnd,
+            formatTimeDisplay(breakStart),
+            formatTimeDisplay(breakEnd),
             minsToHHMM(b.durationMinutes),
             '',
           ]);
@@ -290,7 +288,7 @@ export async function exportDayRosterXLSX(
       const returnAddr = typeof team.returnAddress === 'object' && team.returnAddress
         ? cleanAddress(team.returnAddress.address)
         : cleanAddress(team.baseAddress?.address || '');
-      const r = ws.addRow(['', 'Return to Base', returnAddr, '', last.endTime || '', arrivalTime, '', '']);
+      const r = ws.addRow(['', 'Return to Base', returnAddr, formatTimeDisplay(last.endTime || ''), formatTimeDisplay(arrivalTime), '', '']);
       styleDataRow(r, { fill: teamLightArgb, bold: true });
     }
 

@@ -631,10 +631,13 @@ export default function DayEditor({ state, dispatch, orgId, dbLoaded, supabase, 
             driver_staff_id: team.driverStaffId || null,
             staff_ids: team.staffIds || [],
           };
-          // Only write travel/distance when we have real data (> 0).
-          // This prevents overwriting previously saved values with 0 for
-          // teams whose Google Maps routes haven't loaded this session.
-          if (teamSummary.totalTravelMinutes > 0) {
+          // Only write travel/distance when we have real data (> 0) — this
+          // prevents overwriting previously saved values with 0 for teams
+          // whose Google Maps routes haven't loaded this session. A day with
+          // NO travel legs writes its genuine zeros, otherwise totals from an
+          // old route (e.g. before a base was removed) linger forever and
+          // payroll keeps paying phantom travel.
+          if (teamSummary.totalTravelMinutes > 0 || travelLegCount === 0) {
             scheduleData.total_travel_minutes = teamSummary.totalTravelMinutes;
           }
           // Save the departure time when travel is loaded, or when the day
@@ -644,7 +647,7 @@ export default function DayEditor({ state, dispatch, orgId, dbLoaded, supabase, 
           if (!hasBaseAddress || teamSummary.totalTravelMinutes > 0) {
             scheduleData.base_departure_time = schedTimesResult.baseDepartureTime || team.dayStartTime || null;
           }
-          if (teamSummary.totalDistanceKm > 0) {
+          if (teamSummary.totalDistanceKm > 0 || travelLegCount === 0) {
             scheduleData.total_distance_km = teamSummary.totalDistanceKm;
           }
           if (team.baseAddress) {
@@ -1037,8 +1040,15 @@ export default function DayEditor({ state, dispatch, orgId, dbLoaded, supabase, 
           totalDistKm += segment.distanceKm;
         }
       });
-      // Save active team's totals
-      if (orgId && (totalTravelMins > 0 || totalDistKm > 0)) {
+      // Save active team's totals. Zero-leg days (no base + single job) write
+      // their genuine zeros so stale totals from an old route don't linger.
+      const zeroLegs = (t: { baseAddress: unknown; returnAddress: unknown; clients: unknown[] } | null | undefined) => {
+        if (!t) return false;
+        const hasB = !!t.baseAddress;
+        const hasR = t.returnAddress !== null && t.returnAddress !== 'none';
+        return (hasB ? 1 : 0) + Math.max(0, t.clients.length - 1) + (hasR && t.clients.length > 0 ? 1 : 0) === 0;
+      };
+      if (orgId && (totalTravelMins > 0 || totalDistKm > 0 || zeroLegs(activeTeamRef.current))) {
         const schedDate = stateRef.current.selectedDate;
         await supabase.from('schedules')
           .update({ total_travel_minutes: totalTravelMins, total_distance_km: totalDistKm })
@@ -1058,7 +1068,7 @@ export default function DayEditor({ state, dispatch, orgId, dbLoaded, supabase, 
             otherDistKm += segment.distanceKm;
           }
         });
-        if (orgId && (otherTravelMins > 0 || otherDistKm > 0)) {
+        if (orgId && (otherTravelMins > 0 || otherDistKm > 0 || zeroLegs(otherTeam))) {
           await supabase.from('schedules')
             .update({ total_travel_minutes: otherTravelMins, total_distance_km: otherDistKm })
             .eq('team_id', otherTeam.id)

@@ -3,7 +3,7 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { motion } from 'framer-motion';
 import { createClient } from '@/lib/supabase/client';
-import { ChecklistField, ChecklistSection, migrateOldSection } from '@/components/checklist/types';
+import { ChecklistField, ChecklistSection, migrateOldSection, buildVisibilityMap } from '@/components/checklist/types';
 import { MediaUrls } from '@/lib/types';
 
 interface StaffChecklistViewProps {
@@ -372,10 +372,22 @@ export default function StaffChecklistView({
     if (localKey) { try { localStorage.removeItem(localKey); } catch { /* ignore */ } }
   }, [localKey]);
 
+  // ── Conditional-logic visibility ──────────────────────────────────────────
+  // Hidden fields don't render, don't count toward progress and can't block
+  // submit — same rules as the admin builder preview.
+  const visibilityMap = useMemo(() => {
+    const responses = Array.from(answers.values()).map(a => ({
+      field_id: a.fieldId, value: a.value, na: !!a.na,
+    }));
+    return buildVisibilityMap(sections.flatMap(s => s.fields), responses);
+  }, [sections, answers]);
+
   // ── Load checklist ────────────────────────────────────────────────────────
   const allFields = useMemo(() =>
-    sections.flatMap(s => s.fields.filter(f => f.type !== 'heading' && f.type !== 'paragraph' && f.type !== 'logic')),
-  [sections]);
+    sections.flatMap(s => s.fields.filter(f =>
+      f.type !== 'heading' && f.type !== 'paragraph' && f.type !== 'logic' && visibilityMap[f.id] !== false
+    )),
+  [sections, visibilityMap]);
 
   const loadChecklist = useCallback(async () => {
     const now = new Date();
@@ -1021,7 +1033,13 @@ export default function StaffChecklistView({
             </motion.div>
           ) : (
             <div className="p-4 space-y-3 pb-8">
-              {sections.map(section => (
+              {sections.map(section => {
+                // Conditional logic: drop hidden fields; skip sections left empty
+                const visibleFields = section.fields.filter(f =>
+                  f.type !== 'logic' && visibilityMap[f.id] !== false
+                );
+                if (visibleFields.length === 0) return null;
+                return (
                 <div key={section.id}>
                   {section.title && (
                     <div className="flex items-center gap-3 py-2">
@@ -1032,7 +1050,7 @@ export default function StaffChecklistView({
                   )}
                   {section.description && <p className="text-xs text-text-tertiary text-center mb-2">{section.description}</p>}
                   <div className="space-y-2">
-                    {section.fields.map(field => {
+                    {visibleFields.map(field => {
                       const ans = answers.get(field.id) || { fieldId: field.id, value: null };
                       const answererColor = ans.completed_by ? userColorMap.get(ans.completed_by) : undefined;
                       return (
@@ -1054,7 +1072,8 @@ export default function StaffChecklistView({
                     })}
                   </div>
                 </div>
-              ))}
+                );
+              })}
 
               {/* Notes */}
               <div className="rounded-2xl border-2 border-border-light bg-white p-4">

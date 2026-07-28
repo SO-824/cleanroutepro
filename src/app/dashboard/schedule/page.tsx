@@ -71,6 +71,7 @@ export default function SchedulePage({ overrideRole }: { overrideRole?: 'owner' 
   const [showMonth, setShowMonth] = useState(false);
   const [showWeeklySummary, setShowWeeklySummary] = useState(false);
   const [showClearWeek, setShowClearWeek] = useState(false);
+  const [showExportMenu, setShowExportMenu] = useState(false);
   const [activeDragClient, setActiveDragClient] = useState<SavedClient | null>(null);
   const [activeDragJob, setActiveDragJob] = useState<Client | null>(null);
   const [loadedTemplateName, setLoadedTemplateName] = useState<{ name: string; weekStart: string } | null>(() => {
@@ -1936,6 +1937,98 @@ export default function SchedulePage({ overrideRole }: { overrideRole?: 'owner' 
     [state.teams, state.activeTeamId]
   );
 
+  // ── Export today's roster XLSX — all teams, or a single team ─────────────
+  const handleExportRoster = async (teamFilter?: TeamSchedule) => {
+    setShowExportMenu(false);
+    // Shallow copies — saved day data (staff, driver) is overlaid below for
+    // teams that weren't opened in the editor this session
+    const teamsToExport = (teamFilter ? [teamFilter] : state.teams).map(t => ({ ...t }));
+    const tc = activeWeekSchedules.get(state.selectedDate)?.templateCode;
+
+    // Pull saved schedule data for every team with clients:
+    // staff roster + driver (live state only carries them for teams viewed
+    // this session), travel/distance as summary fallback, and authoritative
+    // base departure / return arrival times.
+    const savedTimesMap = new Map<string, { baseDepartureTime: string | null; returnArrivalTime: string | null }>();
+    type SavedSchedRow = {
+      team_id: string; staff_ids: string[] | null; driver_staff_id: string | null;
+      total_travel_minutes: number | null; total_distance_km: string | number | null;
+      base_departure_time: string | null; return_arrival_time: string | null;
+    };
+    let savedScheds: SavedSchedRow[] = [];
+    const teamIdsWithClients = teamsToExport.filter(t => t.clients.length > 0).map(t => t.id);
+    if (teamIdsWithClients.length > 0 && orgId) {
+      const { data } = await supabase
+        .from('schedules')
+        .select('team_id, staff_ids, driver_staff_id, total_travel_minutes, total_distance_km, base_departure_time, return_arrival_time')
+        .eq('schedule_date', state.selectedDate)
+        .in('team_id', teamIdsWithClients);
+      savedScheds = (data || []) as SavedSchedRow[];
+    }
+
+    // Overlay saved staff/driver BEFORE computing summaries — team size
+    // affects effective job durations and wages.
+    for (const saved of savedScheds) {
+      const t = teamsToExport.find(x => x.id === saved.team_id);
+      if (!t) continue;
+      if ((!t.staffIds || t.staffIds.length === 0) && Array.isArray(saved.staff_ids) && saved.staff_ids.length > 0) {
+        t.staffIds = saved.staff_ids;
+      }
+      if (!t.driverStaffId && saved.driver_staff_id) {
+        t.driverStaffId = saved.driver_staff_id;
+      }
+      savedTimesMap.set(saved.team_id, {
+        baseDepartureTime: saved.base_departure_time || null,
+        returnArrivalTime: saved.return_arrival_time || null,
+      });
+    }
+
+    // Build summaries map from the overlaid teams
+    const summaries = new Map(teamsToExport.map(t => [t.id, calculateDaySummary(t)]));
+    for (const saved of savedScheds) {
+      const existing = summaries.get(saved.team_id);
+      if (existing) {
+        const savedTravel = saved.total_travel_minutes || 0;
+        const savedDist = Number(saved.total_distance_km) || 0;
+        if (existing.totalTravelMinutes === 0 && savedTravel > 0) {
+          existing.totalTravelMinutes = savedTravel;
+          existing.payableMinutes += savedTravel;
+        }
+        if (existing.totalDistanceKm === 0 && savedDist > 0) {
+          existing.totalDistanceKm = savedDist;
+        }
+      }
+    }
+
+    // Client profile "Access & Notes" for every scheduled client (savedClientId → notes)
+    const clientNotesMap = new Map<string, string>();
+    const savedClientIds = [...new Set(
+      teamsToExport.flatMap(t => t.clients.map(c => c.savedClientId).filter((id): id is string => !!id))
+    )];
+    if (savedClientIds.length > 0) {
+      const { data: clientRows } = await supabase
+        .from('clients').select('id, notes').in('id', savedClientIds);
+      for (const row of clientRows || []) {
+        if (row.notes) clientNotesMap.set(row.id, row.notes);
+      }
+    }
+
+    const blob = await exportDayRosterXLSX(teamsToExport, allStaff, state.selectedDate, tc, summaries, clientNotesMap, savedTimesMap);
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.setAttribute('href', url);
+    const dayName = new Date(state.selectedDate + 'T00:00:00').toLocaleDateString('en-AU', { weekday: 'long' });
+    const teamSlug = teamFilter
+      ? `-${teamFilter.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '')}`
+      : '';
+    link.setAttribute('download', `staff-roster${teamSlug}-${dayName}-${state.selectedDate}.xlsx`);
+    link.style.display = 'none';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
+
   if (!dbLoaded) {
     return (
       <APIProvider apiKey={MAPS_KEY} libraries={['places', 'routes']}>
@@ -2076,81 +2169,55 @@ export default function SchedulePage({ overrideRole }: { overrideRole?: 'owner' 
 
               {/* Export Today's Roster — day view only, when any team has clients */}
               {state.viewMode === 'day' && state.teams.some(t => t.clients.length > 0) && (
-                <button
-                  onClick={async () => {
-                    const tc = activeWeekSchedules.get(state.selectedDate)?.templateCode;
-                    // Build summaries map from live state
-                    const summaries = new Map(state.teams.map(t => [t.id, calculateDaySummary(t)]));
+                <div className="relative">
+                  <button
+                    onClick={() => setShowExportMenu(v => !v)}
+                    className={`flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-medium transition-all ${
+                      showExportMenu ? 'bg-primary-light text-primary' : 'text-text-secondary hover:bg-surface-hover hover:text-text-primary'
+                    }`}
+                    title="Export staff roster for today"
+                  >
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                      <polyline points="7 10 12 15 17 10" />
+                      <line x1="12" y1="15" x2="12" y2="3" />
+                    </svg>
+                    Export Today&apos;s Roster
+                    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"
+                      className={`transition-transform ${showExportMenu ? 'rotate-180' : ''}`}>
+                      <polyline points="6 9 12 15 18 9" />
+                    </svg>
+                  </button>
 
-                    // Pull saved schedule data for every team with clients:
-                    // travel/distance as summary fallback (route not calculated
-                    // this session) + authoritative base departure / return
-                    // arrival times for teams whose travel segments aren't loaded.
-                    const savedTimesMap = new Map<string, { baseDepartureTime: string | null; returnArrivalTime: string | null }>();
-                    const teamIdsWithClients = state.teams.filter(t => t.clients.length > 0).map(t => t.id);
-                    if (teamIdsWithClients.length > 0 && orgId) {
-                      const { data: savedScheds } = await supabase
-                        .from('schedules')
-                        .select('team_id, total_travel_minutes, total_distance_km, base_departure_time, return_arrival_time')
-                        .eq('schedule_date', state.selectedDate)
-                        .in('team_id', teamIdsWithClients);
-                      if (savedScheds) {
-                        for (const saved of savedScheds) {
-                          savedTimesMap.set(saved.team_id, {
-                            baseDepartureTime: saved.base_departure_time || null,
-                            returnArrivalTime: saved.return_arrival_time || null,
-                          });
-                          const existing = summaries.get(saved.team_id);
-                          if (existing) {
-                            const savedTravel = saved.total_travel_minutes || 0;
-                            const savedDist = saved.total_distance_km || 0;
-                            if (existing.totalTravelMinutes === 0 && savedTravel > 0) {
-                              existing.totalTravelMinutes = savedTravel;
-                              existing.payableMinutes += savedTravel;
-                            }
-                            if (existing.totalDistanceKm === 0 && savedDist > 0) {
-                              existing.totalDistanceKm = savedDist;
-                            }
-                          }
-                        }
-                      }
-                    }
-
-                    // Client profile "Access & Notes" for every scheduled client (savedClientId → notes)
-                    const clientNotesMap = new Map<string, string>();
-                    const savedClientIds = [...new Set(
-                      state.teams.flatMap(t => t.clients.map(c => c.savedClientId).filter((id): id is string => !!id))
-                    )];
-                    if (savedClientIds.length > 0) {
-                      const { data: clientRows } = await supabase
-                        .from('clients').select('id, notes').in('id', savedClientIds);
-                      for (const row of clientRows || []) {
-                        if (row.notes) clientNotesMap.set(row.id, row.notes);
-                      }
-                    }
-
-                    const blob = await exportDayRosterXLSX(state.teams, allStaff, state.selectedDate, tc, summaries, clientNotesMap, savedTimesMap);
-                    const url = URL.createObjectURL(blob);
-                    const link = document.createElement('a');
-                    link.setAttribute('href', url);
-                    const dayName = new Date(state.selectedDate + 'T00:00:00').toLocaleDateString('en-AU', { weekday: 'long' });
-                    link.setAttribute('download', `staff-roster-${dayName}-${state.selectedDate}.xlsx`);
-                    link.style.display = 'none';
-                    document.body.appendChild(link);
-                    link.click();
-                    document.body.removeChild(link);
-                    URL.revokeObjectURL(url);
-                  }}
-                  className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-medium text-text-secondary hover:bg-surface-hover hover:text-text-primary transition-all"
-                  title="Export staff roster for all teams today"
-                >
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-                    <polyline points="7 10 12 15 17 10" />
-                    <line x1="12" y1="15" x2="12" y2="3" />
-                  </svg>
-                  Export Today&apos;s Roster
-                </button>
+                  {showExportMenu && (
+                    <>
+                      {/* Click-away backdrop */}
+                      <div className="fixed inset-0 z-40" onClick={() => setShowExportMenu(false)} />
+                      <div className="absolute right-0 top-full mt-1 z-50 w-56 bg-white rounded-xl border border-border shadow-dropdown overflow-hidden py-1">
+                        <button
+                          onClick={() => handleExportRoster()}
+                          className="w-full flex items-center gap-2.5 px-3 py-2.5 text-left text-xs font-semibold text-text-primary hover:bg-surface-elevated transition-colors"
+                        >
+                          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="shrink-0 text-text-tertiary">
+                            <path d="M17 21v-8H7v8M7 3v5h8" /><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z" />
+                          </svg>
+                          Export for all teams
+                        </button>
+                        <div className="h-px bg-border-light mx-2 my-1" />
+                        {state.teams.filter(t => t.clients.length > 0).map(team => (
+                          <button
+                            key={team.id}
+                            onClick={() => handleExportRoster(team)}
+                            className="w-full flex items-center gap-2.5 px-3 py-2.5 text-left text-xs font-medium text-text-secondary hover:bg-surface-elevated hover:text-text-primary transition-colors"
+                          >
+                            <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: team.color.primary }} />
+                            Export for {team.name}
+                          </button>
+                        ))}
+                      </div>
+                    </>
+                  )}
+                </div>
               )}
 
               {/* Template badge — left of the calendar icon */}
