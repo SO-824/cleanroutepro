@@ -189,7 +189,7 @@ function TeamRosterCard({ staff, teamColor, teamName }: {
           <path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>
         </svg>
         <p className="text-[10px] font-bold text-text-tertiary uppercase tracking-widest">
-          {teamName ? `${teamName} · Team` : 'Your Team'} ({staff.length})
+          {teamName || 'Your Team'} · {staff.length} staff
         </p>
       </div>
       <div className="flex flex-wrap gap-2">
@@ -604,9 +604,15 @@ export default function StaffPortalPage({ overrideStaffId, overrideStaffName }: 
 
         const tColor = team ? TEAM_COLORS[team.color_index % TEAM_COLORS.length] : TEAM_COLORS[0];
 
-        // Resolve full team roster for this schedule (staff_ids + driver)
+        // Resolve full team roster for this schedule: day-level staff_ids +
+        // driver + every job's assigned staff — many days roster staff on
+        // individual jobs rather than the day-level list, which used to leave
+        // the team roster card empty.
         const memberIds = new Set<string>(sched.staff_ids || []);
         if (sched.driver_staff_id) memberIds.add(sched.driver_staff_id);
+        for (const j of allJobs) {
+          if (j.schedule_id === sched.id) (j.assigned_staff_ids || []).forEach(id => memberIds.add(id));
+        }
         const segStaff: SegmentStaff[] = [...memberIds]
           .map(id => {
             const s = allStaff.find(st => st.id === id);
@@ -1041,6 +1047,7 @@ export default function StaffPortalPage({ overrideStaffId, overrideStaffName }: 
                       <TeamRosterCard
                         staff={selectedDayData.teamSegments[0].staff}
                         teamColor={selectedDayData.teamSegments[0].teamColor}
+                        teamName={isAdminView ? selectedDayData.teamSegments[0].teamName : undefined}
                       />
                     )}
 
@@ -1084,7 +1091,7 @@ export default function StaffPortalPage({ overrideStaffId, overrideStaffName }: 
                             {/* Roster for this segment */}
                             {seg.staff.length > 0 && (
                               <div className="mt-2">
-                                <TeamRosterCard staff={seg.staff} teamColor={seg.teamColor} />
+                                <TeamRosterCard staff={seg.staff} teamColor={seg.teamColor} teamName={seg.teamName} />
                               </div>
                             )}
 
@@ -1262,6 +1269,20 @@ export default function StaffPortalPage({ overrideStaffId, overrideStaffName }: 
                                         {day.driverIsMe ? <>🚗 You&apos;re driving</> : `🚗 ${day.driverName}`}
                                       </p>
                                     )}
+                                    {/* Who's working this day */}
+                                    {(() => {
+                                      const dayStaff = [...new Map(
+                                        day.teamSegments.flatMap(seg => seg.staff).map(m => [m.id, m])
+                                      ).values()];
+                                      if (dayStaff.length === 0) return null;
+                                      return (
+                                        <p className="text-[10px] text-text-tertiary mt-0.5 truncate">
+                                          <span className="font-semibold">{dayStaff.length} staff</span>
+                                          {' · '}
+                                          {dayStaff.map(m => m.isMe ? 'You' : m.name.split(' ')[0]).join(', ')}
+                                        </p>
+                                      );
+                                    })()}
                                   </>
                                 ) : (
                                   <p className="text-sm text-text-tertiary">No jobs</p>

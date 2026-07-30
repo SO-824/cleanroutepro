@@ -70,7 +70,24 @@ function solidFill(argb: string): ExcelJS.FillPattern {
 // notes column was dropped (it duplicated a legacy field) — the single
 // "Access & Notes" column holds the client profile's Access & Notes.
 
-export async function exportDayRosterXLSX(
+export type SavedScheduleTimes = { baseDepartureTime: string | null; returnArrivalTime: string | null };
+
+// Columns: #, Client, Address, Start, End, Total Duration, Access & Notes
+function setRosterColumns(ws: ExcelJS.Worksheet): void {
+  ws.columns = [
+    { width: 10 },
+    { width: 26 },
+    { width: 40 },
+    { width: 11 },
+    { width: 11 },
+    { width: 14 },
+    { width: 48 },
+  ];
+}
+
+/** Append one day's full roster (header + every team section) to a worksheet. */
+function addDayRoster(
+  ws: ExcelJS.Worksheet,
   teams: TeamSchedule[],
   allStaff: StaffMember[],
   date: string,
@@ -82,22 +99,9 @@ export async function exportDayRosterXLSX(
    *  segments aren't loaded (segments are only fetched for teams viewed in the
    *  editor this session — without them the route engine collapses the base
    *  departure onto the first job's start time) */
-  savedTimes?: Map<string, { baseDepartureTime: string | null; returnArrivalTime: string | null }>,
-): Promise<Blob> {
-  const workbook = new ExcelJS.Workbook();
-  const ws = workbook.addWorksheet('Roster');
+  savedTimes?: Map<string, SavedScheduleTimes>,
+): void {
   const staffMap = new Map(allStaff.map(s => [s.id, s]));
-
-  // Columns: #, Client, Address, Start, End, Total Duration, Access & Notes
-  ws.columns = [
-    { width: 10 },
-    { width: 26 },
-    { width: 40 },
-    { width: 11 },
-    { width: 11 },
-    { width: 14 },
-    { width: 48 },
-  ];
 
   // ── Date + day header ──
   if (templateCode) {
@@ -118,11 +122,14 @@ export async function exportDayRosterXLSX(
     let summary = summaries?.get(team.id) || calculateDaySummary(team);
 
     // Fallback: if the route engine returned 0 travel (travelSegments empty for non-active teams),
-    // compute travel from timeline gaps (dayStartTime → first job, gaps between jobs).
+    // compute travel from timeline gaps (departure → first job, gaps between jobs).
+    // Anchor at the day's actual saved departure when available — the team's
+    // nominal dayStartTime fabricates travel on days that start later at the
+    // first job (no start base + pinned start).
     if (summary.totalTravelMinutes === 0 && team.clients.length > 0) {
       const parseTime = (t: string) => { const [h, m] = t.split(':').map(Number); return (h || 0) * 60 + (m || 0); };
       let gapTravel = 0;
-      let lastEnd = parseTime(team.dayStartTime);
+      let lastEnd = parseTime(savedTimes?.get(team.id)?.baseDepartureTime || team.dayStartTime);
 
       // Sort clients by start time
       const sorted = [...team.clients]
@@ -323,10 +330,179 @@ export async function exportDayRosterXLSX(
     addSummaryRow(['Travel', minsToHHMM(summary.totalTravelMinutes), `${(summary.totalTravelMinutes / 60).toFixed(2)} hrs`]);
     addSummaryRow(['Driver Km', `${summary.totalDistanceKm.toFixed(1)} km`]);
   }
+}
 
+const XLSX_MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+
+export async function exportDayRosterXLSX(
+  teams: TeamSchedule[],
+  allStaff: StaffMember[],
+  date: string,
+  templateCode?: string,
+  summaries?: Map<string, DaySummary>,
+  clientNotesMap?: Map<string, string>,
+  savedTimes?: Map<string, SavedScheduleTimes>,
+): Promise<Blob> {
+  const workbook = new ExcelJS.Workbook();
+  const ws = workbook.addWorksheet('Roster');
+  setRosterColumns(ws);
+  addDayRoster(ws, teams, allStaff, date, templateCode, summaries, clientNotesMap, savedTimes);
   const buffer = await workbook.xlsx.writeBuffer();
-  return new Blob(
-    [buffer],
-    { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }
-  );
+  return new Blob([buffer], { type: XLSX_MIME });
+}
+
+// ─── Full-Week Roster XLSX Export ─────────────────────────────────────────────
+// ONE worksheet with every day stacked vertically (Mon → Sun), each day laid
+// out exactly like the single-day export under its own bold date header.
+// Kept single-sheet deliberately: separate per-day tabs are invisible in
+// macOS Quick Look and easily missed, reading as "only Monday exported".
+// Days with no scheduled jobs are skipped.
+
+export interface WeekRosterDay {
+  date: string;
+  teams: TeamSchedule[];
+  templateCode?: string;
+  summaries?: Map<string, DaySummary>;
+  savedTimes?: Map<string, SavedScheduleTimes>;
+}
+
+// Raw DB rows the week export builds from — fetched fresh so the export is
+// the saved truth, independent of any partially-loaded UI cache.
+export interface RawWeekScheduleRow {
+  id: string; team_id: string; schedule_date: string;
+  staff_ids: string[] | null; driver_staff_id: string | null;
+  total_travel_minutes: number | null; total_distance_km: string | number | null;
+  base_departure_time: string | null; return_arrival_time: string | null;
+  has_start_base: boolean | null; has_return_base: boolean | null;
+  base_address: string | null; base_lat: number | null; base_lng: number | null;
+  return_address: string | null; return_lat: number | null; return_lng: number | null;
+  template_code: string | null;
+}
+
+export interface RawWeekJobRow {
+  id: string; schedule_id: string; name: string | null; address: string | null;
+  lat: number | null; lng: number | null; duration_minutes: number | null;
+  start_time: string | null; end_time: string | null; notes: string | null;
+  is_break: boolean | null; position: number | null; client_id: string | null;
+  assigned_staff_ids: string[] | null; staff_count: number | null;
+}
+
+/** Assemble per-day team snapshots for the week export from raw DB rows. */
+export function buildWeekRosterDays(
+  weekDates: string[],
+  teamsMeta: TeamSchedule[],
+  schedRows: RawWeekScheduleRow[],
+  jobRows: RawWeekJobRow[],
+): WeekRosterDay[] {
+  const schedByKey = new Map(schedRows.map(r => [`${r.team_id}::${r.schedule_date}`, r]));
+  const jobsBySchedule = new Map<string, RawWeekJobRow[]>();
+  for (const j of jobRows) {
+    const list = jobsBySchedule.get(j.schedule_id) || [];
+    list.push(j);
+    jobsBySchedule.set(j.schedule_id, list);
+  }
+
+  return weekDates.map(date => {
+    const dayTeams: TeamSchedule[] = [];
+    const summaries = new Map<string, DaySummary>();
+    const savedTimes = new Map<string, SavedScheduleTimes>();
+    let templateCode: string | undefined;
+
+    for (const meta of teamsMeta) {
+      const sched = schedByKey.get(`${meta.id}::${date}`);
+      if (!sched) continue;
+      const rows = (jobsBySchedule.get(sched.id) || []).slice().sort((a, b) => (a.position || 0) - (b.position || 0));
+
+      const clients = rows.filter(r => !r.is_break).map(r => ({
+        id: r.id,
+        name: r.name || '',
+        location: { address: r.address || '', lat: r.lat || 0, lng: r.lng || 0 },
+        jobDurationMinutes: r.duration_minutes || 90,
+        staffCount: r.staff_count || 1,
+        isLocked: false,
+        startTime: r.start_time || undefined,
+        endTime: r.end_time || undefined,
+        notes: r.notes || undefined,
+        savedClientId: r.client_id || undefined,
+        assignedStaffIds: r.assigned_staff_ids || [],
+      }));
+      if (clients.length === 0) continue;
+
+      // Breaks: is_break rows carry {afterClientId, label} in notes JSON
+      const clientIds = new Set(clients.map(c => c.id));
+      const breaks = rows.filter(r => r.is_break).flatMap(r => {
+        try {
+          const m = JSON.parse(r.notes || '{}');
+          if (!m.afterClientId || !clientIds.has(m.afterClientId)) return [];
+          return [{
+            id: m.breakId || r.id,
+            afterClientId: m.afterClientId as string,
+            durationMinutes: r.duration_minutes || 30,
+            label: m.label || r.name || 'Break',
+          }];
+        } catch { return []; }
+      });
+
+      const hasStartBase = sched.has_start_base !== false && !!sched.base_address;
+      const hasReturnBase = sched.has_return_base !== false && !!sched.return_address;
+
+      const t: TeamSchedule = {
+        ...meta,
+        clients,
+        breaks,
+        travelSegments: new Map(),
+        baseAddress: hasStartBase
+          ? { address: sched.base_address!, lat: sched.base_lat || 0, lng: sched.base_lng || 0 }
+          : null,
+        returnAddress: hasReturnBase
+          ? { address: sched.return_address!, lat: sched.return_lat || 0, lng: sched.return_lng || 0 }
+          : (sched.has_return_base === false ? 'none' : null),
+        staffIds: Array.isArray(sched.staff_ids) ? sched.staff_ids : [],
+        driverStaffId: sched.driver_staff_id || null,
+      };
+
+      const summary = calculateDaySummary(t);
+      const savedTravel = sched.total_travel_minutes || 0;
+      const savedDist = Number(sched.total_distance_km) || 0;
+      if (summary.totalTravelMinutes === 0 && savedTravel > 0) {
+        summary.totalTravelMinutes = savedTravel;
+        summary.payableMinutes += savedTravel;
+      }
+      if (summary.totalDistanceKm === 0 && savedDist > 0) {
+        summary.totalDistanceKm = savedDist;
+      }
+      summaries.set(t.id, summary);
+      savedTimes.set(t.id, {
+        baseDepartureTime: sched.base_departure_time || null,
+        returnArrivalTime: sched.return_arrival_time || null,
+      });
+      if (!templateCode && sched.template_code) templateCode = sched.template_code;
+      dayTeams.push(t);
+    }
+
+    return { date, teams: dayTeams, summaries, savedTimes, templateCode };
+  }).filter(d => d.teams.length > 0);
+}
+
+export async function exportWeekRosterXLSX(
+  days: WeekRosterDay[],
+  allStaff: StaffMember[],
+  clientNotesMap?: Map<string, string>,
+): Promise<Blob> {
+  const workbook = new ExcelJS.Workbook();
+  const ws = workbook.addWorksheet('Week Roster');
+  setRosterColumns(ws);
+  let firstDay = true;
+  for (const day of days) {
+    if (!day.teams.some(t => t.clients.length > 0)) continue;
+    if (!firstDay) {
+      ws.addRow([]);
+      ws.addRow([]);
+      ws.addRow([]);
+    }
+    firstDay = false;
+    addDayRoster(ws, day.teams, allStaff, day.date, day.templateCode, day.summaries, clientNotesMap, day.savedTimes);
+  }
+  const buffer = await workbook.xlsx.writeBuffer();
+  return new Blob([buffer], { type: XLSX_MIME });
 }

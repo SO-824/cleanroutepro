@@ -11,7 +11,7 @@ import { calculateScheduleTimes, calculateDaySummary } from '@/lib/routeEngine';
 import { getTodayISO, getWeekDates, getWeekLabel, addDays, generateId } from '@/lib/timeUtils';
 import { TravelSegment, Client, TeamSchedule, TEAM_COLORS, DaySchedule, StaffMember, getNextColorIndex, Location as AppLocation } from '@/lib/types';
 import { computeDayWarnings } from '@/lib/scheduleWarnings';
-import { exportDayRosterXLSX } from '@/lib/rosterXlsxExport';
+import { exportDayRosterXLSX, exportWeekRosterXLSX, buildWeekRosterDays, RawWeekScheduleRow, RawWeekJobRow } from '@/lib/rosterXlsxExport';
 import { useAuth } from '@/lib/hooks/useAuth';
 import { createClient } from '@/lib/supabase/client';
 import { SavedClient } from '@/lib/hooks/useClients';
@@ -1937,6 +1937,72 @@ export default function SchedulePage({ overrideRole }: { overrideRole?: 'owner' 
     [state.teams, state.activeTeamId]
   );
 
+  // Teams with at least one scheduled job somewhere in the visible week
+  const weekTeamsWithJobs = useMemo(() =>
+    state.teams.filter(t =>
+      weekDates.some(d => (weekSchedules.get(t.id)?.get(d)?.clients.length || 0) > 0)
+    ),
+  [state.teams, weekSchedules, weekDates]);
+
+  // ── Export this week's roster XLSX — all teams, or a single team ─────────
+  // One worksheet per day; per-day team snapshots are built from the already
+  // loaded weekSchedules, with saved schedule rows (staff, driver, travel,
+  // departure/arrival times) overlaid so unviewed teams export complete.
+  const handleExportWeekRoster = async (teamFilter?: TeamSchedule) => {
+    setShowExportMenu(false);
+    const teamsMeta = teamFilter ? [teamFilter] : state.teams;
+    const teamIds = teamsMeta.map(t => t.id);
+    if (!orgId || teamIds.length === 0) return;
+
+    // Fetch the saved week straight from the DB — the export must reflect
+    // saved truth even when the UI's in-memory week cache is only partially
+    // loaded (e.g. only the day last opened in the editor).
+    const { data: schedData } = await supabase
+      .from('schedules')
+      .select('id, team_id, schedule_date, staff_ids, driver_staff_id, total_travel_minutes, total_distance_km, base_departure_time, return_arrival_time, has_start_base, has_return_base, base_address, base_lat, base_lng, return_address, return_lat, return_lng, template_code')
+      .in('schedule_date', weekDates)
+      .in('team_id', teamIds);
+    const schedRows = (schedData || []) as RawWeekScheduleRow[];
+
+    let jobRows: RawWeekJobRow[] = [];
+    const schedIds = schedRows.map(r => r.id);
+    if (schedIds.length > 0) {
+      const { data: jobData } = await supabase
+        .from('schedule_jobs')
+        .select('id, schedule_id, name, address, lat, lng, duration_minutes, start_time, end_time, notes, is_break, position, client_id, assigned_staff_ids, staff_count')
+        .in('schedule_id', schedIds)
+        .order('position');
+      jobRows = (jobData || []) as RawWeekJobRow[];
+    }
+
+    const days = buildWeekRosterDays(weekDates, teamsMeta, schedRows, jobRows);
+
+    // Client profile "Access & Notes" for every client scheduled this week
+    const savedClientIds = [...new Set(jobRows.map(j => j.client_id).filter((id): id is string => !!id))];
+    const clientNotesMap = new Map<string, string>();
+    if (savedClientIds.length > 0) {
+      const { data: clientRows } = await supabase
+        .from('clients').select('id, notes').in('id', savedClientIds);
+      for (const row of clientRows || []) {
+        if (row.notes) clientNotesMap.set(row.id, row.notes);
+      }
+    }
+
+    const blob = await exportWeekRosterXLSX(days, allStaff, clientNotesMap);
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.setAttribute('href', url);
+    const teamSlug = teamFilter
+      ? `-${teamFilter.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '')}`
+      : '-all-teams';
+    link.setAttribute('download', `staff-roster${teamSlug}-${weekDates[0]}-to-${weekDates[6]}.xlsx`);
+    link.style.display = 'none';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
+
   // ── Export today's roster XLSX — all teams, or a single team ─────────────
   const handleExportRoster = async (teamFilter?: TeamSchedule) => {
     setShowExportMenu(false);
@@ -2226,6 +2292,59 @@ export default function SchedulePage({ overrideRole }: { overrideRole?: 'owner' 
                   <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
                   Loaded from {loadedTemplateName.name}
                 </span>
+              )}
+
+              {/* Export This Week's Roster — week view only, when any team has jobs */}
+              {state.viewMode === 'week' && weekTeamsWithJobs.length > 0 && (
+                <div className="relative">
+                  <button
+                    onClick={() => setShowExportMenu(v => !v)}
+                    className={`flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-medium transition-all ${
+                      showExportMenu ? 'bg-primary-light text-primary' : 'text-text-secondary hover:bg-surface-hover hover:text-text-primary'
+                    }`}
+                    title="Export staff roster for this week"
+                  >
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                      <polyline points="7 10 12 15 17 10" />
+                      <line x1="12" y1="15" x2="12" y2="3" />
+                    </svg>
+                    Export This Week&apos;s Roster
+                    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"
+                      className={`transition-transform ${showExportMenu ? 'rotate-180' : ''}`}>
+                      <polyline points="6 9 12 15 18 9" />
+                    </svg>
+                  </button>
+
+                  {showExportMenu && (
+                    <>
+                      {/* Click-away backdrop */}
+                      <div className="fixed inset-0 z-40" onClick={() => setShowExportMenu(false)} />
+                      <div className="absolute right-0 top-full mt-1 z-50 w-56 bg-white rounded-xl border border-border shadow-dropdown overflow-hidden py-1">
+                        <button
+                          onClick={() => handleExportWeekRoster()}
+                          className="w-full flex items-center gap-2.5 px-3 py-2.5 text-left text-xs font-semibold text-text-primary hover:bg-surface-elevated transition-colors"
+                        >
+                          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="shrink-0 text-text-tertiary">
+                            <path d="M17 21v-8H7v8M7 3v5h8" /><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z" />
+                          </svg>
+                          Export for all teams
+                        </button>
+                        <div className="h-px bg-border-light mx-2 my-1" />
+                        {weekTeamsWithJobs.map(team => (
+                          <button
+                            key={team.id}
+                            onClick={() => handleExportWeekRoster(team)}
+                            className="w-full flex items-center gap-2.5 px-3 py-2.5 text-left text-xs font-medium text-text-secondary hover:bg-surface-elevated hover:text-text-primary transition-colors"
+                          >
+                            <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: team.color.primary }} />
+                            Export for {team.name}
+                          </button>
+                        ))}
+                      </div>
+                    </>
+                  )}
+                </div>
               )}
 
               {state.viewMode === 'week' && !isRestricted && (
