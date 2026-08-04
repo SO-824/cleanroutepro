@@ -406,6 +406,14 @@ export default function StaffChecklistView({
       return map;
     };
 
+    // Always fetch the client's email — the "Email report to client" button
+    // depends on it, and it must work whether the job carries its own
+    // checklist or falls back to the client default.
+    if (clientId) {
+      const { data: clientRow } = await supabase.from('clients').select('email').eq('id', clientId).single();
+      if (clientRow?.email) setClientEmail(clientRow.email);
+    }
+
     if (jobChecklistId) {
       const { data: cl } = await supabase.from('client_checklists').select('id, name, sections').eq('id', jobChecklistId).single();
       if (cl) {
@@ -420,8 +428,6 @@ export default function StaffChecklistView({
     }
 
     if (clientId) {
-      const { data: clientRow } = await supabase.from('clients').select('email, checklist_template_id').eq('id', clientId).single();
-      if (clientRow?.email) setClientEmail(clientRow.email);
       const { data: defaultCl } = await supabase.from('client_checklists').select('id, name, sections').eq('client_id', clientId).eq('is_default', true).maybeSingle();
       if (defaultCl) {
         setTemplateId(defaultCl.id);

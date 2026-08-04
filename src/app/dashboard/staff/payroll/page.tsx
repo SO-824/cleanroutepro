@@ -6,6 +6,7 @@ import { motion } from 'framer-motion';
 import { useAuth } from '@/lib/hooks/useAuth';
 import { createClient } from '@/lib/supabase/client';
 import Link from 'next/link';
+import HelpTip from '@/components/HelpTip';
 import { exportPayrollXlsx, DayPayrollData } from '@/lib/payrollXlsxExport';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -430,7 +431,10 @@ export default function PayrollPage() {
             </svg>
           </Link>
           <div>
-            <h2 className="text-lg font-bold text-text-primary">Payroll Export</h2>
+            <div className="flex items-center gap-1.5">
+              <h2 className="text-lg font-bold text-text-primary">Payroll Export</h2>
+              <HelpTip tip="Hours combine each person's share of job time plus travel. Review the daily breakdown, then export the pay period as a spreadsheet." article="payroll" />
+            </div>
             <p className="text-sm text-text-secondary">Weekly staff summary &amp; wage calculation</p>
           </div>
         </div>

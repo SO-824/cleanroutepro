@@ -32,6 +32,7 @@ const NAV_ICONS = {
   staffView:   'M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8zM12 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6z',
   settings:    'M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7zM19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z',
   mySchedule:  'M8 2v4M16 2v4M3 10h18M3 6a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6z',
+  help:        'M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20zM9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3M12 17h.01',
 };
 
 /** Build nav items based on role — desktop only. Mobile always shows staff view. */
@@ -46,6 +47,7 @@ function getNavForRole(role: Role): NavItem[] {
         { label: 'Staff',      href: '/dashboard/staff',          icon: NAV_ICONS.staff },
         { label: 'Staff View', href: '/dashboard/staff-preview',  icon: NAV_ICONS.staffView },
         { label: 'Org Settings', href: '/dashboard/settings',     icon: NAV_ICONS.settings },
+        { label: 'Help',       href: '/dashboard/help',           icon: NAV_ICONS.help },
       ];
     case 'admin':
       return [
@@ -56,22 +58,26 @@ function getNavForRole(role: Role): NavItem[] {
         { label: 'Staff',      href: '/dashboard/staff',          icon: NAV_ICONS.staff },
         { label: 'Staff View', href: '/dashboard/staff-preview',  icon: NAV_ICONS.staffView },
         { label: 'Org Settings', href: '/dashboard/settings',     icon: NAV_ICONS.settings },
+        { label: 'Help',       href: '/dashboard/help',           icon: NAV_ICONS.help },
       ];
     case 'supervisor':
       return [
         { label: 'My Schedule',          href: '/dashboard/staff-view', icon: NAV_ICONS.mySchedule },
         { label: 'Published Schedules',  href: '/dashboard/completed',  icon: NAV_ICONS.completed },
+        { label: 'Help',                 href: '/dashboard/help',       icon: NAV_ICONS.help },
       ];
     case 'staff':
     default:
       return [
         { label: 'My Schedule', href: '/dashboard/staff-view', icon: NAV_ICONS.mySchedule },
+        { label: 'Help',        href: '/dashboard/help',       icon: NAV_ICONS.help },
       ];
   }
 }
 
 const MOBILE_STAFF_NAV: NavItem[] = [
   { label: 'My Schedule', href: '/dashboard/staff-view', icon: NAV_ICONS.mySchedule },
+  { label: 'Help',        href: '/dashboard/help',       icon: NAV_ICONS.help },
 ];
 
 export default function DashboardShell({ children, serverProfile }: { children: React.ReactNode; serverProfile: UserProfile | null }) {
@@ -118,6 +124,7 @@ function Inner({ children }: { children: React.ReactNode }) {
       && !pathname.startsWith('/dashboard/staff-view')
       && !pathname.startsWith('/dashboard/account')
       && !pathname.startsWith('/dashboard/checklist')
+      && !pathname.startsWith('/dashboard/help')
       && pathname !== '/dashboard') {
       router.replace('/dashboard/staff-view');
     }

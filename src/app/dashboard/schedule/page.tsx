@@ -13,6 +13,7 @@ import { TravelSegment, Client, TeamSchedule, TEAM_COLORS, DaySchedule, StaffMem
 import { computeDayWarnings } from '@/lib/scheduleWarnings';
 import { exportDayRosterXLSX, exportWeekRosterXLSX, buildWeekRosterDays, RawWeekScheduleRow, RawWeekJobRow } from '@/lib/rosterXlsxExport';
 import { useAuth } from '@/lib/hooks/useAuth';
+import HelpTip from '@/components/HelpTip';
 import { createClient } from '@/lib/supabase/client';
 import { SavedClient } from '@/lib/hooks/useClients';
 
@@ -2269,6 +2270,7 @@ export default function SchedulePage({ overrideRole }: { overrideRole?: 'owner' 
                           </svg>
                           Export for all teams
                         </button>
+                        <div className="px-3 pb-1"><HelpTip tip="Downloads a styled spreadsheet of today's run sheet: per-team jobs, times and the client Access & Notes." article="roster-exports" /></div>
                         <div className="h-px bg-border-light mx-2 my-1" />
                         {state.teams.filter(t => t.clients.length > 0).map(team => (
                           <button
@@ -2418,6 +2420,7 @@ export default function SchedulePage({ overrideRole }: { overrideRole?: 'owner' 
                       Publish
                     </button>
                   )}
+                  <HelpTip align="right" tip="Publishing makes this week visible to staff on their phones. Edits after publishing need a re-publish before staff see them." article="scheduling" />
 
                   {/* Published Weeks button */}
                   <button

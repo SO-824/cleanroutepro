@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
 import { APIProvider } from '@vis.gl/react-google-maps';
 import { useAuth } from '@/lib/hooks/useAuth';
+import HelpTip from '@/components/HelpTip';
 import { useClients } from '@/lib/hooks/useClients';
 import { createClient as createSupabaseClient } from '@/lib/supabase/client';
 import { ChecklistSection, migrateOldSection } from '@/components/checklist/types';
@@ -321,6 +322,9 @@ export default function ChecklistsPage() {
             </svg>
             New Client
           </button>
+          <div className="flex justify-center">
+            <HelpTip tip="Clients hold the address (for routing), rate, email (for checklist reports) and Access & Notes shown to staff. Each client can have checklists — one marked as the default." article="clients" />
+          </div>
         </div>
 
         {/* Client + checklist tree */}
@@ -456,6 +460,7 @@ export default function ChecklistsPage() {
                     {selectedChecklistId === 'new' ? 'New Checklist' : selectedChecklist?.name || 'Edit Checklist'}
                   </h2>
                 </div>
+                <HelpTip align="right" tip="Build the form staff fill in on-site: sections, required fields, photos and conditional logic. Set one checklist as the client's default." article="checklist-building" />
                 {selectedChecklist && (
                   <div className="flex items-center gap-1.5 shrink-0">
                     {savedAsTemplate ? (

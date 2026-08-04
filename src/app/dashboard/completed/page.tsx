@@ -7,6 +7,7 @@ import { useAuth } from '@/lib/hooks/useAuth';
 import { getTodayISO, getWeekDates, getWeekLabel, getShortDayLabel } from '@/lib/timeUtils';
 import { ChecklistSection, migrateOldSection, buildVisibilityMap } from '@/components/checklist/types';
 import { COLLAB_COLORS } from '@/components/StaffChecklistView';
+import HelpTip from '@/components/HelpTip';
 
 const STAFF_COLORS = COLLAB_COLORS.map((c: { bg: string; text: string }) => c.bg);
 const DAY_NAMES = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
@@ -934,7 +935,10 @@ export default function CompletedPage() {
       <div className="shrink-0 bg-white border-b border-border-light px-4 lg:px-6 py-3 lg:py-4">
         <div className="flex items-center gap-4 flex-wrap justify-between">
           <div>
-            <h1 className="text-lg font-bold text-text-primary">Completed Jobs</h1>
+            <div className="flex items-center gap-1.5">
+              <h1 className="text-lg font-bold text-text-primary">Completed Jobs</h1>
+              <HelpTip tip="Watch checklists fill in live as staff work, review answers and photos, and reset progress if needed." article="checklist-review" />
+            </div>
             <p className="text-sm text-text-tertiary mt-0.5">{weekLabel}</p>
           </div>
 

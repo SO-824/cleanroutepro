@@ -4,6 +4,7 @@ import { useState, useMemo, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { motion } from 'framer-motion';
 import { useAuth } from '@/lib/hooks/useAuth';
+import HelpTip from '@/components/HelpTip';
 import { createClient } from '@/lib/supabase/client';
 import { getAppTimezone, setAppTimezone, TIMEZONE_OPTIONS } from '@/lib/timezone';
 
@@ -119,7 +120,7 @@ export default function SettingsPage() {
   return (
     <div className="h-full overflow-y-auto p-4 lg:p-6 custom-scrollbar pb-20 lg:pb-6">
       <div className="max-w-[600px] mx-auto space-y-6">
-        <div><h2 className="text-lg font-bold text-text-primary">Organisation Settings</h2><p className="text-sm text-text-secondary">Manage your organisation's settings</p></div>
+        <div><div className="flex items-center gap-1.5"><h2 className="text-lg font-bold text-text-primary">Organisation Settings</h2><HelpTip tip="Organisation-wide defaults: name, timezone, rates, fuel settings and the payroll cycle start day." article="org-setup" /></div><p className="text-sm text-text-secondary">Manage your organisation's settings</p></div>
 
         {/* Business Profile */}
         <div className="card-elevated p-5 space-y-4">
@@ -273,7 +274,18 @@ export default function SettingsPage() {
             <span className="text-sm text-text-secondary capitalize">{profile?.subscription_tier || 'Pro'} Plan</span>
           </div>
           <p className="text-xs text-text-tertiary">Manage your subscription and billing through the Stripe Customer Portal.</p>
-          <button className="btn-secondary text-sm" onClick={() => window.open('/api/stripe/portal', '_blank')}>Manage Subscription</button>
+          <button className="btn-secondary text-sm" onClick={async () => {
+            // The portal route is POST and returns { url } — a plain
+            // window.open GET hits a 405 and shows an error page.
+            try {
+              const res = await fetch('/api/stripe/portal', { method: 'POST' });
+              const data = await res.json();
+              if (res.ok && data.url) window.open(data.url, '_blank');
+              else alert(data.error || 'Could not open the billing portal.');
+            } catch {
+              alert('Could not open the billing portal — please try again.');
+            }
+          }}>Manage Subscription</button>
         </div>
 
         {/* Account Info */}

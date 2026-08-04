@@ -3,6 +3,7 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useAuth } from '@/lib/hooks/useAuth';
+import HelpTip from '@/components/HelpTip';
 import { useChecklistMasters, AssignResult } from '@/lib/hooks/useChecklistMasters';
 import { createClient } from '@/lib/supabase/client';
 import { useRouter } from 'next/navigation';
@@ -165,7 +166,10 @@ export default function TemplatesPage() {
         <div className="px-5 pt-5 pb-0">
           <div className="flex items-center justify-between mb-4">
             <div>
+              <div className="flex items-center gap-1.5">
               <h1 className="text-lg font-bold text-text-primary">Templates</h1>
+              <HelpTip tip="Save a week's schedule as a reusable template, then load it into any future week instead of rebuilding from scratch." article="templates" />
+            </div>
               <p className="text-sm text-text-secondary mt-0.5">Manage reusable schedule and checklist templates</p>
             </div>
             {/* Action button — context-dependent */}

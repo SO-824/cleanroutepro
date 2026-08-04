@@ -6,6 +6,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { useAuth } from '@/lib/hooks/useAuth';
 import { createClient } from '@/lib/supabase/client';
 import Link from 'next/link';
+import HelpTip from '@/components/HelpTip';
 
 interface StaffMember {
   id: string;
@@ -542,7 +543,10 @@ export default function StaffPage() {
         {/* ── Page header ──────────────────────────────────────────────── */}
         <div className="flex items-center justify-between gap-3">
           <div>
-            <h1 className="text-xl font-bold text-text-primary">Staff</h1>
+            <div className="flex items-center gap-1.5">
+              <h1 className="text-xl font-bold text-text-primary">Staff</h1>
+              <HelpTip tip="Add staff to the roster, invite them to the portal, and manage their access. New staff must register an account before you can invite them." article="admin-onboarding-guide" />
+            </div>
             <p className="text-sm text-text-secondary mt-0.5">
               {activeStaff.length} active{archivedStaff.length > 0 ? ` · ${archivedStaff.length} archived` : ''} ·{' '}
               {activeAccounts.length} with portal access
