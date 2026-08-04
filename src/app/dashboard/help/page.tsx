@@ -70,8 +70,8 @@ function HelpContent() {
 
   return (
     <div className="h-full flex overflow-hidden">
-      {/* ── Sidebar ── */}
-      <div className="w-60 md:w-72 shrink-0 flex flex-col border-r border-border-light bg-surface-elevated/40">
+      {/* ── Sidebar — desktop only; phones use the landing list + back button ── */}
+      <div className="hidden md:flex w-72 shrink-0 flex-col border-r border-border-light bg-surface-elevated/40">
         <div className="shrink-0 p-3 border-b border-border-light space-y-2">
           <button onClick={() => router.push('/dashboard/help', { scroll: false })}
             className="flex items-center gap-2 w-full text-left px-2 py-1.5 rounded-lg hover:bg-surface-hover transition-colors">
@@ -130,7 +130,15 @@ function HelpContent() {
       <div id="help-scroll-pane" className="flex-1 min-w-0 overflow-y-auto overflow-x-hidden custom-scrollbar">
         {activeArticle ? (
           <motion.div key={activeArticle.id} initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }}
-            className="max-w-3xl mx-auto px-6 lg:px-10 py-8 pb-24">
+            className="max-w-3xl mx-auto px-5 lg:px-10 py-6 md:py-8 pb-24">
+            {/* Mobile back button — the sidebar is hidden on phones */}
+            <button onClick={() => router.push('/dashboard/help', { scroll: false })}
+              className="md:hidden flex items-center gap-1.5 text-sm text-primary font-semibold mb-4 active:scale-95 transition-transform">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                <polyline points="15 18 9 12 15 6"/>
+              </svg>
+              All help topics
+            </button>
             <p className="text-[11px] font-bold uppercase tracking-widest text-primary mb-1">{activeArticle.category}</p>
             <h1 className="text-2xl font-extrabold text-text-primary tracking-tight">{activeArticle.title}</h1>
             <p className="text-sm text-text-tertiary mt-1.5">{activeArticle.description}</p>
@@ -145,12 +153,22 @@ function HelpContent() {
           </motion.div>
         ) : (
           <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }}
-            className="max-w-4xl mx-auto px-6 lg:px-10 py-10 pb-24">
-            <h1 className="text-3xl font-extrabold text-text-primary tracking-tight">How can we help?</h1>
+            className="max-w-4xl mx-auto px-5 lg:px-10 py-8 md:py-10 pb-24">
+            <h1 className="text-2xl md:text-3xl font-extrabold text-text-primary tracking-tight">How can we help?</h1>
             <p className="text-sm text-text-secondary mt-2 max-w-xl">
               Guides and instructions for everything in CleanRoute Pro — from onboarding staff to
               publishing schedules, running checklists and processing payroll.
             </p>
+
+            {/* Mobile search — the sidebar (with its search box) is hidden on phones */}
+            <div className="md:hidden relative mt-5">
+              <svg className="absolute left-3.5 top-1/2 -translate-y-1/2 text-text-tertiary pointer-events-none" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+              </svg>
+              <input value={search} onChange={e => setSearch(e.target.value)}
+                placeholder="Search help…" className="input-field w-full py-2.5"
+                style={{ paddingLeft: '2.5rem' }} />
+            </div>
 
             {featured.length > 0 && (
               <>
