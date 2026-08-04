@@ -207,12 +207,22 @@ function Inner({ children }: { children: React.ReactNode }) {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ membershipId: inviteId, action }),
     });
-    if (res.ok && action === 'accept') {
-      await refreshProfile();
-      await loadOrgs();
-      router.push('/dashboard');
-      router.refresh();
+    if (res.ok) {
+      if (action === 'accept') {
+        await refreshProfile();
+        await loadOrgs();
+        router.push('/dashboard');
+        router.refresh();
+      }
+      return;
     }
+    // Failed: put the optimistically-removed invite back unless it's gone for
+    // good (withdrawn/expired), so the user can retry instead of losing it.
+    if (res.status !== 409 && res.status !== 410) {
+      await loadOrgs();
+    }
+    const data = await res.json().catch(() => ({}));
+    alert(data.error || 'Could not respond to the invitation — please try again.');
   };
 
   // ── No-org state ──────────────────────────────────────────────────────────

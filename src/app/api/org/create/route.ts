@@ -21,21 +21,37 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: orgError?.message || 'Failed to create organisation' }, { status: 500 });
     }
 
-    // Link user to org as owner
-    await supabase.from('profiles').update({
+    // Link user to org as owner. Both linking writes are checked and rolled
+    // back on failure — an unchecked failure here is what produces an account
+    // that "has an org" with no membership row (invisible in Accounts & Access
+    // and unrevokable).
+    const { error: profileErr } = await supabase.from('profiles').update({
       org_id: org.id,
       role: 'owner',
       full_name: user.user_metadata?.full_name || '',
       onboarding_completed: true,
     }).eq('id', user.id);
 
+    if (profileErr) {
+      await supabase.from('organizations').delete().eq('id', org.id);
+      console.error('[Create Org] profile link failed:', profileErr.message);
+      return NextResponse.json({ error: `Failed to link your account: ${profileErr.message}` }, { status: 500 });
+    }
+
     // Create org membership
-    await supabase.from('org_members').insert({
+    const { error: memberErr } = await supabase.from('org_members').insert({
       user_id: user.id,
       org_id: org.id,
       role: 'owner',
       status: 'accepted',
     });
+
+    if (memberErr) {
+      await supabase.from('profiles').update({ org_id: null }).eq('id', user.id);
+      await supabase.from('organizations').delete().eq('id', org.id);
+      console.error('[Create Org] membership insert failed:', memberErr.message);
+      return NextResponse.json({ error: `Failed to create membership: ${memberErr.message}` }, { status: 500 });
+    }
 
     // Add staff members if provided
     if (staff && Array.isArray(staff) && staff.length > 0) {

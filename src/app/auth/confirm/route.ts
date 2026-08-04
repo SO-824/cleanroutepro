@@ -26,58 +26,12 @@ export async function GET(request: NextRequest) {
     if (!error && data?.user) {
       const user = data.user;
 
-      // ── Sync invite metadata for staff who accepted via email link ──────
-      // When inviteUserByEmail is used, the staff_member_id and org_id are
-      // stored in the user's auth metadata. We need to ensure both
-      // org_members and staff_members reflect the accepted status.
-      const meta = user.user_metadata ?? {};
-      const staffMemberId: string | undefined = meta.staff_member_id;
-      const orgId: string | undefined = meta.org_id;
-
-      if (staffMemberId && orgId) {
-        try {
-          // Upsert org_members so it has the staff_member_id linked
-          const { data: existingMembership } = await supabase
-            .from('org_members')
-            .select('id, status, staff_member_id')
-            .eq('user_id', user.id)
-            .eq('org_id', orgId)
-            .maybeSingle();
-
-          if (existingMembership) {
-            // Update existing row — set accepted + link staff_member_id
-            await supabase
-              .from('org_members')
-              .update({ status: 'accepted', staff_member_id: staffMemberId })
-              .eq('id', existingMembership.id);
-          } else {
-            // No row yet — create it
-            await supabase.from('org_members').insert({
-              user_id: user.id,
-              org_id: orgId,
-              role: 'staff',
-              staff_member_id: staffMemberId,
-              status: 'accepted',
-            });
-          }
-
-          // Sync staff_members.invite_status → 'accepted'
-          await supabase
-            .from('staff_members')
-            .update({ invite_status: 'accepted', user_id: user.id })
-            .eq('id', staffMemberId);
-
-          // Ensure their profile has the correct org + role
-          await supabase
-            .from('profiles')
-            .update({ org_id: orgId, role: 'staff' })
-            .eq('id', user.id);
-        } catch (syncErr) {
-          console.error('[Auth Confirm] Failed to sync invite metadata:', syncErr);
-          // Non-fatal — user is still authenticated, just redirect normally
-        }
-      }
-      // ────────────────────────────────────────────────────────────────────
+      // NOTE: this route used to auto-accept an org invite from stale auth
+      // metadata (staff_member_id + org_id) — joining the user to an org
+      // without consent, and doing it with writes that RLS silently blocked,
+      // which left the badges mismatched. Accepting is now exclusively the
+      // in-app flow (/api/invite/respond), which verifies ownership, checks
+      // every write, and can be declined. Nothing to sync here.
 
       const { data: profile } = await supabase.from('profiles').select('role, org_id').eq('id', user.id).maybeSingle();
       if (!profile?.org_id) {

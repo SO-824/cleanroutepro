@@ -10,13 +10,15 @@ export async function POST(request: Request) {
     const { orgId } = await request.json();
     if (!orgId) return NextResponse.json({ error: 'Missing orgId' }, { status: 400 });
 
-    // Verify user is a member of this org
+    // Verify user is an ACCEPTED member of this org — a pending invite must
+    // be accepted through the invite flow, not activated by switching into it.
     const { data: membership } = await supabase
       .from('org_members')
       .select('role')
       .eq('user_id', user.id)
       .eq('org_id', orgId)
-      .single();
+      .eq('status', 'accepted')
+      .maybeSingle();
 
     if (!membership) {
       return NextResponse.json({ error: 'Not a member of this organisation' }, { status: 403 });

@@ -62,48 +62,73 @@ export async function POST(request: NextRequest) {
       // Check if they're already a member of this org
       const { data: existingMember } = await adminSupabase
         .from('org_members')
-        .select('id')
+        .select('id, status')
         .eq('user_id', existingUser.id)
         .eq('org_id', profile.org_id)
         .maybeSingle();
 
+      // An accepted membership means they're already in. A PENDING one means
+      // this is a re-send — refresh the link and report success rather than
+      // erroring out (the old code made "Resend invite" always fail).
       if (existingMember) {
-        return NextResponse.json({ error: 'This person already has access to your organisation' }, { status: 400 });
+        if (existingMember.status === 'accepted') {
+          return NextResponse.json({ error: 'This person already has access to your organisation' }, { status: 400 });
+        }
+        const { error: relinkErr } = await adminSupabase
+          .from('staff_members')
+          .update({ user_id: existingUser.id, invite_status: 'pending', email })
+          .eq('id', staffMemberId);
+        if (relinkErr) {
+          console.error('[Staff Invite] staff_members re-link failed:', relinkErr.message);
+          return NextResponse.json({ error: `Failed to link staff record: ${relinkErr.message}` }, { status: 500 });
+        }
+        // Keep the membership pointed at this roster row in case it drifted
+        await adminSupabase.from('org_members')
+          .update({ staff_member_id: staffMemberId })
+          .eq('id', existingMember.id);
+        return NextResponse.json({
+          success: true, existing: true, resent: true,
+          message: 'Invitation is pending — they will see it when they log in to CleanRoute Pro',
+        });
+      }
+
+      // Link the staff_members record FIRST: if this fails there is no
+      // membership row yet, so there's nothing to half-create.
+      const { error: linkErr } = await adminSupabase
+        .from('staff_members')
+        .update({ user_id: existingUser.id, invite_status: 'pending', email })
+        .eq('id', staffMemberId);
+      if (linkErr) {
+        console.error('[Staff Invite] staff_members link failed:', linkErr.message);
+        return NextResponse.json({ error: `Failed to link staff record: ${linkErr.message}` }, { status: 500 });
       }
 
       // Add them as a PENDING member — they must accept in-app
-      await adminSupabase.from('org_members').insert({
+      const { error: memberErr } = await adminSupabase.from('org_members').insert({
         user_id: existingUser.id,
         org_id: profile.org_id,
         role: 'staff',
         staff_member_id: staffMemberId,
         status: 'pending',
       });
-
-      // Link the staff_members record
-      await adminSupabase
-        .from('staff_members')
-        .update({ user_id: existingUser.id, invite_status: 'pending', email })
-        .eq('id', staffMemberId);
-
-      // Send an email notification so the user knows they've been invited
-      // (inviteUserByEmail with an existing user triggers a magic-link email)
-      try {
-        await adminSupabase.auth.admin.inviteUserByEmail(email, {
-          data: {
-            full_name: name || '',
-            org_id: profile.org_id,
-            staff_member_id: staffMemberId,
-            role: 'staff',
-          },
-          redirectTo: `${process.env.NEXT_PUBLIC_APP_URL || request.nextUrl.origin}/auth/confirm`,
-        });
-      } catch (emailErr) {
-        // Non-fatal — the DB invite is already created, they can still log in manually
-        console.warn('[Staff Invite] Email notification failed for existing user:', emailErr);
+      if (memberErr) {
+        // Roll the staff link back so the roster doesn't show a phantom invite
+        await adminSupabase.from('staff_members')
+          .update({ user_id: null, invite_status: 'none' })
+          .eq('id', staffMemberId);
+        console.error('[Staff Invite] org_members insert failed:', memberErr.message);
+        return NextResponse.json({ error: `Failed to create invitation: ${memberErr.message}` }, { status: 500 });
       }
 
-      return NextResponse.json({ success: true, existing: true, message: 'Invitation sent — they will receive an email notification' });
+      // NOTE: no email is sent here. Supabase's inviteUserByEmail only works
+      // for brand-new addresses and errors with "email_exists" for anyone who
+      // already has an account — which is the only case that reaches this
+      // branch. The invite is delivered in-app: it appears on their dashboard
+      // the next time they log in. Don't claim an email was sent.
+      return NextResponse.json({
+        success: true, existing: true,
+        message: 'Invitation created — they will see it when they log in to CleanRoute Pro',
+      });
     }
 
     // New user — they need to create an account first

@@ -38,6 +38,7 @@ export default function DashboardHomePage() {
   const [newClientAddress, setNewClientAddress] = useState<Location | null>(null);
   const [creating, setCreating] = useState(false);
   const [respondingTo, setRespondingTo] = useState<string | null>(null);
+  const [inviteError, setInviteError] = useState<string | null>(null);
 
   // Load pending invites via server API (bypasses RLS)
   const loadInvites = useCallback(async () => {
@@ -81,6 +82,14 @@ export default function DashboardHomePage() {
         router.push('/dashboard');
         router.refresh();
       } else {
+        setPendingInvites(prev => prev.filter(i => i.id !== inviteId));
+      }
+    } else {
+      // Surface the failure instead of leaving the invite looking untouched.
+      // A withdrawn/expired invite (409/410) is dropped from the list.
+      const data = await res.json().catch(() => ({}));
+      setInviteError(data.error || 'Could not respond to the invitation — please try again.');
+      if (res.status === 409 || res.status === 410) {
         setPendingInvites(prev => prev.filter(i => i.id !== inviteId));
       }
     }
@@ -294,6 +303,11 @@ export default function DashboardHomePage() {
           {view === 'home' && (
             <motion.div key="home" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -20 }} className="w-full max-w-[520px]">
               {/* Pending Invites */}
+              {inviteError && (
+                <div className="mb-4 px-4 py-3 rounded-xl bg-rose-50 border border-rose-200 text-sm text-rose-700 font-medium">
+                  {inviteError}
+                </div>
+              )}
               {pendingInvites.length > 0 && (
                 <div className="mb-6 space-y-3">
                   {pendingInvites.map((invite) => (

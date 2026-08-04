@@ -487,8 +487,14 @@ export default function StaffPortalPage({ overrideStaffId, overrideStaffName }: 
       // Preview mode: staff identity is supplied by the parent — roster is all we need
       if (overrideStaffId) return;
 
+      // Scope to the ACTIVE org: a login can be staff in several orgs, and an
+      // unscoped lookup returns multiple rows → maybeSingle yields null → the
+      // staff view silently shows no jobs.
       const { data: me } = await supabase
-        .from('staff_members').select('id').eq('user_id', profile.id).maybeSingle();
+        .from('staff_members').select('id')
+        .eq('user_id', profile.id)
+        .eq('org_id', profile.org_id)
+        .maybeSingle();
       if (me) { setStaffMemberId(me.id); return; }
 
       // Fallback: match by email

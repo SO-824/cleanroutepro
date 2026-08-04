@@ -342,7 +342,9 @@ export default function StaffPage() {
   }, [supabase, profile?.org_id]);
 
   useEffect(() => { if (profile?.org_id) loadStaff(); }, [profile?.org_id, loadStaff]);
-  useEffect(() => { if (profile?.org_id && activeSection === 'accounts') loadAccounts(); }, [profile?.org_id, activeSection, loadAccounts]);
+  // Load accounts on mount too — the roster header's "N with portal access"
+  // count reads from it and otherwise shows 0 until the Accounts tab is opened.
+  useEffect(() => { if (profile?.org_id) loadAccounts(); }, [profile?.org_id, activeSection, loadAccounts]);
 
   const handleSave = async () => {
     if (!profile?.org_id || !form.name.trim()) return;
@@ -369,26 +371,45 @@ export default function StaffPage() {
   // ── Archive / Unarchive ────────────────────────────────────────────────
   const handleArchive = async (s: StaffMember) => {
     const newArchived = !s.archived;
+    let revokedAccess = false;
 
-    // If archiving, automatically revoke their portal access for security
-    if (newArchived && s.user_id) {
+    // If archiving, revoke portal access first. Always attempt it when the
+    // person has any account link (a pending invite sets user_id server-side
+    // without the roster knowing), and ABORT the archive if it fails —
+    // otherwise we'd archive someone who silently keeps full access.
+    if (newArchived && (s.user_id || s.invite_status === 'pending' || s.invite_status === 'accepted')) {
       try {
-        await fetch('/api/staff/remove', {
+        const res = await fetch('/api/staff/remove', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ staffMemberId: s.id, revokeAccountOnly: true })
         });
+        if (!res.ok) {
+          const data = await res.json().catch(() => ({}));
+          showToast('error', data.error || 'Could not revoke access — staff member was not archived.');
+          return;
+        }
         // The backend clears user_id and invite_status, so update local state
         s.user_id = null;
         s.invite_status = null;
+        revokedAccess = true;
       } catch (err) {
         console.error('Failed to revoke access during archive:', err);
+        showToast('error', 'Could not revoke access — staff member was not archived.');
+        return;
       }
     }
 
-    await supabase.from('staff_members').update({ archived: newArchived }).eq('id', s.id);
+    const { error } = await supabase.from('staff_members').update({ archived: newArchived }).eq('id', s.id);
+    if (error) {
+      showToast('error', `Failed to ${newArchived ? 'archive' : 'restore'}: ${error.message}`);
+      return;
+    }
     setStaff(prev => prev.map(m => m.id === s.id ? { ...m, archived: newArchived, user_id: s.user_id, invite_status: s.invite_status } : m));
-    showToast('success', newArchived ? `${s.name} archived and access revoked` : `${s.name} restored to active roster`);
+    showToast('success', newArchived
+      ? `${s.name} archived${revokedAccess ? ' and access revoked' : ''}`
+      : `${s.name} restored to active roster`);
+    loadAccounts();
   };
 
   // ── Availability toggles ───────────────────────────────────────────────
@@ -420,8 +441,12 @@ export default function StaffPage() {
       if (!res.ok) {
         showToast('error', data.error || 'Failed to send invite');
       } else {
-        showToast('success', `Invite sent to ${s.email}`);
-        setStaff(prev => prev.map(m => m.id === s.id ? { ...m, invite_status: 'pending' } : m));
+        // No email is sent — the invite appears in-app on their dashboard.
+        showToast('success', data.message || `${s.name} will see the invite when they log in`);
+        // Refetch so user_id (set server-side) lands locally — archive and the
+        // badges depend on it.
+        await loadStaff();
+        loadAccounts();
       }
     } catch {
       showToast('error', 'Network error — please try again');

@@ -43,7 +43,7 @@ export async function POST(request: NextRequest) {
     // Fetch the staff member — must belong to this org
     const { data: staffMember } = await serverSupabase
       .from('staff_members')
-      .select('id, org_id, user_id, invite_status, name')
+      .select('id, org_id, user_id, invite_status, name, email')
       .eq('id', staffMemberId)
       .eq('org_id', profile.org_id)
       .single();
@@ -57,9 +57,38 @@ export async function POST(request: NextRequest) {
       process.env.SUPABASE_SERVICE_ROLE_KEY!,
     );
 
-    const linkedUserId = staffMember.user_id;
+    // ── Resolve the linked login. staff_members.user_id alone is NOT enough:
+    // a half-completed invite can leave the account reachable only via the
+    // org_members link or the profile email — and a removal that misses it
+    // leaves the person with full org access.
+    let linkedUserId: string | null = staffMember.user_id;
+    if (!linkedUserId) {
+      const { data: om } = await adminSupabase
+        .from('org_members')
+        .select('user_id')
+        .eq('staff_member_id', staffMemberId)
+        .eq('org_id', profile.org_id)
+        .maybeSingle();
+      linkedUserId = om?.user_id || null;
+    }
+    if (!linkedUserId && staffMember.email) {
+      const { data: p } = await adminSupabase
+        .from('profiles')
+        .select('id')
+        .ilike('email', staffMember.email)
+        .eq('org_id', profile.org_id)
+        .maybeSingle();
+      linkedUserId = p?.id || null;
+    }
 
-    // ── 1. Remove org_members row (revokes portal access) ──────────────────
+    // ── 1. Remove org_members rows (revokes portal access) — matched both by
+    // staff link and by user id so half-linked rows can't survive ───────────
+    await adminSupabase
+      .from('org_members')
+      .delete()
+      .eq('staff_member_id', staffMemberId)
+      .eq('org_id', profile.org_id);
+
     if (linkedUserId) {
       await adminSupabase
         .from('org_members')
@@ -73,34 +102,46 @@ export async function POST(request: NextRequest) {
         .update({ user_id: null, invite_status: null })
         .eq('id', staffMemberId);
 
-      // ── 3. Check if user has any remaining orgs ───────────────────────────
+      // ── 3. Check remaining ACCEPTED memberships ──────────────────────────
+      // Pending invites don't count — auto-switching into one would drop the
+      // user inside an org they never accepted.
       const { data: remainingMemberships } = await adminSupabase
         .from('org_members')
-        .select('id')
-        .eq('user_id', linkedUserId);
+        .select('id, org_id, role')
+        .eq('user_id', linkedUserId)
+        .eq('status', 'accepted');
 
       const hasOtherOrgs = (remainingMemberships || []).length > 0;
 
-      // ── 4. Detach user from this org if no remaining memberships ────────
-      if (!hasOtherOrgs) {
-        // Clear org_id + role so the user lands on the welcome screen on next login
-        await adminSupabase
-          .from('profiles')
-          .update({ org_id: null, role: null })
-          .eq('id', linkedUserId);
-      } else {
-        // Auto-switch to another org they still belong to
-        const nextOrg = remainingMemberships![0];
-        const { data: nextMembership } = await adminSupabase
-          .from('org_members')
-          .select('org_id, role')
-          .eq('id', nextOrg.id)
-          .single();
-        if (nextMembership) {
-          await adminSupabase
+      // ── 4. Repoint the profile — only if it currently points at THIS org,
+      // so a user active elsewhere isn't yanked out of that org.
+      const { data: targetProfile } = await adminSupabase
+        .from('profiles').select('org_id').eq('id', linkedUserId).single();
+
+      if (targetProfile?.org_id === profile.org_id) {
+        if (!hasOtherOrgs) {
+          // Clear org_id so the user lands on the welcome screen on next login.
+          // NOTE: role stays — profiles.role is NOT NULL; writing null here made
+          // the whole detach silently fail, leaving removed staff with access.
+          const { error: detachErr } = await adminSupabase
             .from('profiles')
-            .update({ org_id: nextMembership.org_id, role: nextMembership.role })
+            .update({ org_id: null })
             .eq('id', linkedUserId);
+          if (detachErr) {
+            console.error('[Staff Remove] detach failed:', detachErr.message);
+            return NextResponse.json({ error: `Access was not fully revoked: ${detachErr.message}` }, { status: 500 });
+          }
+        } else {
+          // Auto-switch to another org they still belong to
+          const next = remainingMemberships![0];
+          const { error: switchErr } = await adminSupabase
+            .from('profiles')
+            .update({ org_id: next.org_id, role: next.role })
+            .eq('id', linkedUserId);
+          if (switchErr) {
+            console.error('[Staff Remove] org switch failed:', switchErr.message);
+            return NextResponse.json({ error: `Access was not fully revoked: ${switchErr.message}` }, { status: 500 });
+          }
         }
       }
     }

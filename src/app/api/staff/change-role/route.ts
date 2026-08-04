@@ -69,11 +69,15 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: `org_members update failed: ${omErr.message}` }, { status: 500 });
     }
 
-    // Update profiles role
+    // Update profiles.role ONLY when this org is the member's active org.
+    // profiles.role is global, so writing it while they're active in another
+    // org would grant them that role THERE — cross-org privilege escalation.
+    // When they switch back here, accept/switch re-syncs role from org_members.
     const { error: pErr } = await adminSupabase
       .from('profiles')
       .update({ role: newRole })
-      .eq('id', membership.user_id);
+      .eq('id', membership.user_id)
+      .eq('org_id', membership.org_id);
 
     if (pErr) {
       return NextResponse.json({ error: `profiles update failed: ${pErr.message}` }, { status: 500 });
