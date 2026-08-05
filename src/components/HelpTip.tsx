@@ -62,25 +62,29 @@ export default function HelpTip({
       </button>
 
       {open && (
+        // The visual gap below the icon is PADDING on this hover-continuous
+        // wrapper, not a margin — a margin gap would fire mouseleave while the
+        // cursor travels to the popover, closing it before "Learn more" is
+        // clickable.
         <span
-          className={`absolute top-full mt-1.5 z-[70] w-60 rounded-xl bg-gray-900 text-white shadow-xl px-3.5 py-3 ${
-            align === 'right' ? 'right-0' : 'left-0'
-          }`}
+          className={`absolute top-full z-[70] pt-1.5 ${align === 'right' ? 'right-0' : 'left-0'}`}
           onClick={(e) => e.stopPropagation()}
         >
-          <span className="block text-[11px] leading-relaxed text-white/90">{tip}</span>
-          {href && (
-            <button
-              type="button"
-              onClick={() => { setOpen(false); router.push(href); }}
-              className="mt-1.5 inline-flex items-center gap-1 text-[11px] font-bold text-white hover:underline"
-            >
-              Learn more
-              <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-                <line x1="5" y1="12" x2="19" y2="12" /><polyline points="12 5 19 12 12 19" />
-              </svg>
-            </button>
-          )}
+          <span className="block w-60 rounded-xl bg-gray-900 text-white shadow-xl px-3.5 py-3">
+            <span className="block text-[11px] leading-relaxed text-white/90">{tip}</span>
+            {href && (
+              <button
+                type="button"
+                onClick={() => { setOpen(false); router.push(href); }}
+                className="mt-1.5 inline-flex items-center gap-1 text-[11px] font-bold text-white hover:underline"
+              >
+                Learn more
+                <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                  <line x1="5" y1="12" x2="19" y2="12" /><polyline points="12 5 19 12 12 19" />
+                </svg>
+              </button>
+            )}
+          </span>
         </span>
       )}
     </span>
