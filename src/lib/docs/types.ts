@@ -6,6 +6,7 @@
 //   - item            → bulleted list
 //   1. item           → numbered list (any number + dot)
 //   **bold**          → bold (used for button / UI labels)
+//   [label](https://…) → external link (opens in a new tab)
 //   > text            → callout box (tips, warnings)
 //   plain lines      → paragraphs
 // Blank lines separate blocks.

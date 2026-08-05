@@ -49,7 +49,7 @@ New staff are recorded with the role of cleaner, and their availability starts a
 
 Before you can invite someone, they must create their own CleanRoute Pro account:
 
-1. Ask them to go to the CleanRoute Pro website and open the registration page.
+1. Ask them to go to the CleanRoute Pro website at [cleanroutepro.vercel.app](https://cleanroutepro.vercel.app/) and open the registration page.
 
 2. They fill in **Email** (the same address you put on the roster), **Password** and **Confirm Password**, then click **Create Account**.
 
@@ -138,7 +138,7 @@ Welcome to the team! CleanRoute Pro is where you will find your cleaning schedul
 
 Before your manager can invite you, you need your own CleanRoute Pro account.
 
-1. Open the CleanRoute Pro website your manager gave you.
+1. Open the CleanRoute Pro website: [cleanroutepro.vercel.app](https://cleanroutepro.vercel.app/)
 
 2. On the sign-in page, press the **Create one** link under the sign-in form.
 
@@ -206,13 +206,47 @@ There is no separate app to download. The staff view IS the website, designed fo
 
 1. Open your phone's web browser (Safari, Chrome or similar).
 
-2. Go to the same CleanRoute Pro website address.
+2. Go to the CleanRoute Pro website: [cleanroutepro.vercel.app](https://cleanroutepro.vercel.app/)
 
 3. Sign in with your email and password.
 
 You will get the mobile My Schedule view with the Today, Schedule and Completed tabs.
 
-> Tip: bookmark the page or add it to your phone's home screen so it is one tap away each morning.
+## Add the app to your home screen
+
+Adding CleanRoute Pro to your phone's home screen gives you an app icon that opens your schedule with one tap — no typing the address or hunting through tabs. Do this once during setup.
+
+### iPhone or iPad (Safari)
+
+1. Open [cleanroutepro.vercel.app](https://cleanroutepro.vercel.app/) in Safari and log in.
+
+2. Tap the **Share** button — the square with an arrow pointing up, in the middle of the bar at the bottom of the screen.
+
+3. Scroll down the share menu and tap **Add to Home Screen**.
+
+4. You can rename it (for example CleanRoute) — then tap **Add** in the top-right corner.
+
+The icon now sits on your home screen like any other app. Tapping it opens straight to your schedule.
+
+> On iPhone this only works from Safari. If the **Add to Home Screen** option is missing, you are probably in a different browser or inside another app's built-in browser — open the site in the real Safari app and try again.
+
+### Android (Chrome)
+
+1. Open [cleanroutepro.vercel.app](https://cleanroutepro.vercel.app/) in Chrome and log in.
+
+2. Tap the three-dot menu in the top-right corner.
+
+3. Tap **Add to Home screen** (on some phones it says **Install app**).
+
+4. Confirm with **Add**.
+
+> Samsung Internet users: tap the menu button, then **Add page to**, then **Home screen**.
+
+### After adding it
+
+- The icon behaves like an app: tap it and you land on your My Schedule view, already logged in (you stay signed in unless you log out).
+
+- If your schedule ever looks out of date after opening from the icon, pull down to refresh, or fully close it and open it again.
 
 ## Before your roster appears
 
@@ -1256,7 +1290,7 @@ CleanRoute Pro does not send invitation emails. The invite appears inside the ap
 
 If the person cannot see the invite card, work through these causes.
 
-1. They have not registered yet. The person must create their own account at the CleanRoute Pro website first. If they have no account, the admin sees an error saying the user was not found and to ask them to create an account first, then invite again.
+1. They have not registered yet. The person must create their own account at [cleanroutepro.vercel.app](https://cleanroutepro.vercel.app/) first. If they have no account, the admin sees an error saying the user was not found and to ask them to create an account first, then invite again.
 
 2. They registered with a different email address. The invite is matched to the exact email the admin typed. Check both sides for typos, and check which address the person actually registered with — it is shown on their welcome screen.
 

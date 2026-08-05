@@ -8,7 +8,7 @@ import { docAnchor } from '@/lib/docs/types';
 // ## / ### headings (anchored), - bullets, 1. numbered lists, > callouts,
 // **bold**, and plain paragraphs. Deliberately tiny — no external deps.
 
-function renderInline(text: string, keyPrefix: string): React.ReactNode[] {
+function renderBold(text: string, keyPrefix: string): React.ReactNode[] {
   // **bold** spans
   const parts = text.split(/(\*\*[^*]+\*\*)/g);
   return parts.map((part, i) => {
@@ -16,6 +16,23 @@ function renderInline(text: string, keyPrefix: string): React.ReactNode[] {
       return <strong key={`${keyPrefix}-${i}`} className="font-semibold text-text-primary">{part.slice(2, -2)}</strong>;
     }
     return <React.Fragment key={`${keyPrefix}-${i}`}>{part}</React.Fragment>;
+  });
+}
+
+function renderInline(text: string, keyPrefix: string): React.ReactNode[] {
+  // [label](https://url) links first, then **bold** within the rest
+  const parts = text.split(/(\[[^\]]+\]\(https?:\/\/[^)\s]+\))/g);
+  return parts.map((part, i) => {
+    const m = part.match(/^\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)$/);
+    if (m) {
+      return (
+        <a key={`${keyPrefix}-l${i}`} href={m[2]} target="_blank" rel="noopener noreferrer"
+          className="font-semibold text-primary underline underline-offset-2 hover:opacity-80 break-all">
+          {m[1]}
+        </a>
+      );
+    }
+    return <React.Fragment key={`${keyPrefix}-${i}`}>{renderBold(part, `${keyPrefix}-b${i}`)}</React.Fragment>;
   });
 }
 
