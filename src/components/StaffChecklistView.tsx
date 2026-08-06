@@ -13,6 +13,10 @@ interface StaffChecklistViewProps {
   scheduleJobId?: string;
   jobChecklistId?: string | null;
   onClose: () => void;
+  /** Preview mode: render these sections exactly as staff see them, with all
+   *  persistence disabled — no completion row, no uploads, no realtime. */
+  previewSections?: ChecklistSection[];
+  previewName?: string;
 }
 
 // ─── Staff color palette (6 distinct colors for collaboration) ────────────────
@@ -118,9 +122,15 @@ function FieldCard({
   if (field.type === 'checkbox') {
     const checked = value === true || value === 'true';
     return (
-      <button
+      // div with button semantics, NOT a <button>: the N/A control inside is a
+      // real button, and nested buttons are invalid HTML (hydration errors,
+      // flaky taps on iOS)
+      <div
+        role="button"
+        tabIndex={0}
         onClick={() => !isNa && onChange(!checked)}
-        className={`w-full flex items-center gap-4 rounded-2xl border-2 p-4 text-left transition-all active:scale-[0.99]`}
+        onKeyDown={e => { if ((e.key === 'Enter' || e.key === ' ') && !isNa) { e.preventDefault(); onChange(!checked); } }}
+        className={`w-full flex items-center gap-4 rounded-2xl border-2 p-4 text-left transition-all active:scale-[0.99] cursor-pointer select-none`}
         style={checked && answererColor ? { borderColor: answererColor, backgroundColor: answererColor + '18' } : undefined}
       >
         <div
@@ -147,7 +157,7 @@ function FieldCard({
               isNa ? 'bg-surface-elevated border-border text-text-secondary' : 'border-border-light text-text-tertiary'
             }`}>N/A</button>
         )}
-      </button>
+      </div>
     );
   }
 
@@ -306,7 +316,9 @@ function FieldCard({
 // ─── Main component ───────────────────────────────────────────────────────────
 export default function StaffChecklistView({
   clientId, clientName, clientAddress, scheduleJobId, jobChecklistId, onClose,
+  previewSections, previewName,
 }: StaffChecklistViewProps) {
+  const isPreview = !!previewSections;
   const supabase = useMemo(() => createClient(), []);
   const [sections, setSections] = useState<ChecklistSection[]>([]);
   const [answers, setAnswers] = useState<Map<string, FieldAnswer>>(new Map());
@@ -406,6 +418,16 @@ export default function StaffChecklistView({
       return map;
     };
 
+    // Preview mode: render the provided sections and never touch the DB
+    if (previewSections) {
+      setTemplateId('preview');
+      setTemplateName(previewName || 'Checklist');
+      setSections(previewSections);
+      setAnswers(initAnswers(previewSections));
+      setLoading(false);
+      return;
+    }
+
     // Always fetch the client's email — the "Email report to client" button
     // depends on it, and it must work whether the job carries its own
     // checklist or falls back to the client default.
@@ -441,7 +463,7 @@ export default function StaffChecklistView({
     }
 
     setLoading(false);
-  }, [supabase, clientId, jobChecklistId]);
+  }, [supabase, clientId, jobChecklistId, previewSections, previewName]);
 
   useEffect(() => { loadChecklist(); }, [loadChecklist]);
 
@@ -653,6 +675,25 @@ export default function StaffChecklistView({
 
   // ── Media upload ──────────────────────────────────────────────────────────
   const handleFileChange = async (fieldId: string, files: FileList) => {
+    // Preview: show the photos locally without uploading anything
+    if (isPreview) {
+      const uploaded = Array.from(files).map(f => URL.createObjectURL(f));
+      pendingFieldsRef.current.set(fieldId, Date.now());
+      setMediaUrls(prev => {
+        const next = { ...prev, [fieldId]: [...(prev[fieldId] || []), ...uploaded] };
+        mediaUrlsRef.current = next;
+        return next;
+      });
+      setAnswers(prev => {
+        const next = new Map(prev);
+        const cur = next.get(fieldId) || { fieldId, value: [] };
+        const existing = Array.isArray(cur.value) ? cur.value as string[] : [];
+        next.set(fieldId, { ...cur, value: [...existing, ...uploaded] });
+        answersRef.current = next;
+        return next;
+      });
+      return;
+    }
     setUploading(true);
     const { data: { user } } = await supabase.auth.getUser();
     const uploaded: string[] = [];
@@ -726,6 +767,11 @@ export default function StaffChecklistView({
   }, []);
 
   const performSave = async (isFinal: boolean) => {
+    // Preview: nothing is ever written; submitting just shows the done screen
+    if (isPreview) {
+      if (isFinal) setSaved(true);
+      return;
+    }
     if (!templateId) return;
 
     // Prevent concurrent saves — queue a follow-up if one is in progress
@@ -887,6 +933,9 @@ export default function StaffChecklistView({
       if (sec.title) body += `\n— ${sec.title} —\n`;
       sec.fields.forEach(f => {
         if (f.type === 'heading' || f.type === 'paragraph' || f.type === 'logic') return;
+        // Fields hidden by conditional logic stay out of the report — a stale
+        // answer from before the field was hidden must not leak to the client
+        if (visibilityMap[f.id] === false) return;
         const ans = answers.get(f.id);
         if (!ans) return;
         let val = 'No response';

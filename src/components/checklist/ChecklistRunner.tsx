@@ -54,9 +54,10 @@ export default function ChecklistRunner({
   const allFields = useMemo(() => sections.flatMap(s => s.fields), [sections]);
   const visibilityMap = useMemo(() => buildVisibilityMap(allFields, responses), [allFields, responses]);
 
-  // Compute visible interactive fields (headings and logic blocks are decorative)
+  // Compute visible interactive fields (headings, paragraphs and logic blocks
+  // are decorative — counting paragraphs made 100% progress unreachable)
   const visibleFields: ChecklistField[] = useMemo(() =>
-    allFields.filter(f => f.type !== 'heading' && f.type !== 'logic' && visibilityMap[f.id] !== false),
+    allFields.filter(f => f.type !== 'heading' && f.type !== 'paragraph' && f.type !== 'logic' && visibilityMap[f.id] !== false),
     [allFields, visibilityMap]
   );
 

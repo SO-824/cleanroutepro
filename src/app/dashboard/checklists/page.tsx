@@ -11,6 +11,7 @@ import { createClient as createSupabaseClient } from '@/lib/supabase/client';
 import { ChecklistSection, migrateOldSection } from '@/components/checklist/types';
 import ChecklistBuilder from '@/components/checklist/ChecklistBuilder';
 import ClientProfileView from '@/components/ClientProfileView';
+import StaffChecklistView from '@/components/StaffChecklistView';
 import PlacesAutocomplete from '@/components/PlacesAutocomplete';
 import { useChecklistMasters } from '@/lib/hooks/useChecklistMasters';
 import type { Location } from '@/lib/types';
@@ -144,6 +145,7 @@ export default function ChecklistsPage() {
   const selectChecklist = (clientId: string, checklistId: string) => {
     // If already viewing this checklist, don't reload (would wipe unsaved edits)
     if (selectedChecklistId === checklistId) return;
+    if (!confirmDiscardEdits()) return;
     setSelectedClientId(clientId);
     setSelectedChecklistId(checklistId);
     const cl = allChecklists.find(c => c.id === checklistId);
@@ -152,19 +154,32 @@ export default function ChecklistsPage() {
       setBuilderSections(migrated);
       setBuilderName(cl.name);
       setBuilderIsDefault(cl.is_default);
+      setBuilderDirty(false);
     }
   };
 
   const openNewChecklist = (clientId: string) => {
+    if (!confirmDiscardEdits()) return;
     setSelectedClientId(clientId);
     setSelectedChecklistId('new');
     setBuilderSections([{ id: crypto.randomUUID(), title: '', fields: [] }]);
     setBuilderName('');
     setBuilderIsDefault(checklistsFor(clientId).length === 0);
+    setBuilderDirty(false);
   };
 
   const [builderSections, setBuilderSections] = useState<ChecklistSection[]>([]);
   const [builderName, setBuilderName] = useState('');
+  const [showStaffPreview, setShowStaffPreview] = useState(false);
+  // Edits live only in state until Save is pressed — track dirtiness so
+  // switching checklists can't silently discard work
+  const [builderDirty, setBuilderDirty] = useState(false);
+  const handleBuilderChange: React.Dispatch<React.SetStateAction<ChecklistSection[]>> = useCallback((action) => {
+    setBuilderDirty(true);
+    setBuilderSections(action);
+  }, []);
+  const confirmDiscardEdits = () =>
+    !builderDirty || confirm('You have unsaved checklist changes. Discard them?');
   const [builderIsDefault, setBuilderIsDefault] = useState(false);
   const [saving, setSaving] = useState(false);
   const [savedAsTemplate, setSavedAsTemplate] = useState(false);
@@ -209,11 +224,12 @@ export default function ChecklistsPage() {
     if (!selectedChecklistId || selectedChecklistId === 'new') return;
     const checklist = allChecklists.find(c => c.id === selectedChecklistId);
     if (!checklist) return;
-    const migrated = (checklist.sections as Record<string, unknown>[]).map(s => migrateOldSection(s));
-    await addMaster(checklist.name || 'Untitled Template', migrated);
+    // Template from the LIVE builder state — snapshotting the last-saved copy
+    // silently dropped whatever the admin was editing on screen
+    await addMaster(checklist.name || 'Untitled Template', builderSections);
     setSavedAsTemplate(true);
     setTimeout(() => setSavedAsTemplate(false), 2000);
-  }, [selectedChecklistId, allChecklists, addMaster]);
+  }, [selectedChecklistId, allChecklists, addMaster, builderSections]);
 
   const handleSave = useCallback(async (name: string, sections: ChecklistSection[], isDefault: boolean) => {
     if (!orgId || !selectedClientId) return;
@@ -254,6 +270,7 @@ export default function ChecklistsPage() {
     }
 
     setSaving(false);
+    setBuilderDirty(false);
   }, [orgId, selectedClientId, selectedChecklistId, supabase]);
 
   const handleSetDefault = async (cl: ClientChecklist) => {
@@ -461,6 +478,17 @@ export default function ChecklistsPage() {
                   </h2>
                 </div>
                 <HelpTip align="right" tip="Build the form staff fill in on-site: sections, required fields, photos and conditional logic. Set one checklist as the client's default." article="checklist-building" />
+                {/* Preview exactly as staff see it — works for unsaved edits too */}
+                <button
+                  onClick={() => setShowStaffPreview(true)}
+                  className="flex items-center gap-1.5 text-xs font-semibold text-primary px-2.5 py-1.5 rounded-lg border border-primary/25 hover:bg-primary/5 transition-colors shrink-0"
+                  title="Preview this checklist exactly as staff will see it on their phone"
+                >
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <rect x="7" y="2" width="10" height="20" rx="2"/><line x1="11" y1="18" x2="13" y2="18"/>
+                  </svg>
+                  Preview as staff
+                </button>
                 {selectedChecklist && (
                   <div className="flex items-center gap-1.5 shrink-0">
                     {savedAsTemplate ? (
@@ -488,7 +516,7 @@ export default function ChecklistsPage() {
                 <ChecklistBuilder
                   key={selectedChecklistId}
                   sections={builderSections}
-                  onChange={setBuilderSections}
+                  onChange={handleBuilderChange}
                   initialName={builderName}
                   initialIsDefault={builderIsDefault}
                   mode="client-profile"
@@ -609,6 +637,51 @@ export default function ChecklistsPage() {
         </AnimatePresence>
       </div>
       </div>
+
+      {/* ── Staff preview: the REAL staff checklist component in a phone frame,
+             fed the current (possibly unsaved) builder state, fully sandboxed ── */}
+      <AnimatePresence>
+        {showStaffPreview && (
+          <motion.div
+            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[80] bg-black/75 flex flex-col items-center justify-center p-4"
+            onClick={() => setShowStaffPreview(false)}
+          >
+            <div className="mb-3 flex items-center gap-2" onClick={e => e.stopPropagation()}>
+              <span className="text-[11px] font-semibold text-white/90 bg-white/10 px-3 py-1.5 rounded-full">
+                Staff preview — exactly what staff see; nothing entered here is saved
+              </span>
+              <button
+                onClick={() => setShowStaffPreview(false)}
+                className="w-7 h-7 flex items-center justify-center rounded-full bg-white/10 text-white hover:bg-white/20 transition-colors"
+                title="Close preview"
+              >
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                  <path d="M18 6L6 18M6 6l12 12"/>
+                </svg>
+              </button>
+            </div>
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.95, opacity: 0 }}
+              onClick={e => e.stopPropagation()}
+              className="relative w-[390px] max-w-[95vw] h-[790px] max-h-[82vh] rounded-[2.2rem] border-[8px] border-gray-900 bg-gray-900 overflow-hidden shadow-2xl"
+            >
+              {/* transform makes this the containing block, so the staff view's
+                  fixed inset-0 fills the phone frame instead of the screen */}
+              <div className="w-full h-full overflow-hidden rounded-[1.7rem] bg-white [transform:translateZ(0)]">
+                <StaffChecklistView
+                  key={`preview-${selectedChecklistId}`}
+                  clientId=""
+                  clientName={clients.find(c => c.id === selectedClientId)?.name || 'Client'}
+                  previewSections={builderSections}
+                  previewName={builderName || 'Checklist'}
+                  onClose={() => setShowStaffPreview(false)}
+                />
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </APIProvider>
   );
 }

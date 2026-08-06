@@ -12,7 +12,7 @@ import {
   useSortable, arrayMove,
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import { ChecklistField, ChecklistSection, FieldType, FieldResponse, LogicCondition } from './types';
+import { ChecklistField, ChecklistSection, FieldType, FieldResponse, LogicCondition, isCompleteLogicCondition } from './types';
 import ChecklistRunner from './ChecklistRunner';
 
 // ─── Block type catalogue ────────────────────────────────────────────────────
@@ -678,9 +678,16 @@ function LogicBlockEditor({ field, allFields, onChange, onRemove, onMove, isFirs
                 {idx === 0 && <span className="text-[10px] font-black text-violet-500 uppercase tracking-widest">If</span>}
 
                 <div className="flex flex-wrap items-center gap-1.5">
-                  {/* Field selector */}
+                  {/* Field selector — the operator resets to the FIRST one the
+                      chosen field type actually offers (text/date/checkbox
+                      fields don't support "equals"; committing it anyway made
+                      the rule display one thing and store another) */}
                   <select value={cond.fieldId}
-                    onChange={e => updateCond(idx, { fieldId: e.target.value, operator: 'equals', value: '' })}
+                    onChange={e => {
+                      const nextField = allFields.find(f => f.id === e.target.value);
+                      const firstOp = getOperatorsFor(nextField)[0].v as LogicCondition['operator'];
+                      updateCond(idx, { fieldId: e.target.value, operator: firstOp, value: '' });
+                    }}
                     className="input-field text-xs py-1 flex-1 min-w-[120px]">
                     <option value="">Select a field…</option>
                     {eligibleFields.map(f => (
@@ -766,6 +773,26 @@ function LogicBlockEditor({ field, allFields, onChange, onRemove, onMove, isFirs
             </p>
           )}
         </div>
+
+        {/* ── Incomplete-rule warning — a half-built rule is silently ignored,
+               which reads as "conditional logic isn't working" to admins ── */}
+        {(() => {
+          const committed = (field.logicConditions ?? []).filter(isCompleteLogicCondition);
+          if (committed.length > 0 && logicTargets.length > 0) return null;
+          const reason = committed.length === 0
+            ? ((field.logicConditions?.length ?? 0) === 0
+              ? 'pick a question in the If row above'
+              : 'finish the If row — choose a value to compare against')
+            : 'choose at least one block under Then';
+          return (
+            <div className="flex items-start gap-2 px-3 py-2.5 rounded-xl bg-amber-50 border border-amber-300">
+              <span className="text-amber-500 text-sm leading-none mt-0.5">⚠</span>
+              <p className="text-[11px] font-semibold text-amber-800 leading-snug">
+                This rule is incomplete and currently does nothing — {reason}.
+              </p>
+            </div>
+          );
+        })()}
       </div>
     </div>
   );
@@ -802,20 +829,33 @@ export default function ChecklistBuilder({
 
   // Functional-updater version of setFields to avoid stale closure bugs.
   // All field mutations go through this so they always read the latest state.
+  // Preserve the first section's title/description and any additional
+  // sections — rebuilding as [{title: ''}] silently wiped them on every edit.
   const setFields = useCallback((updater: ChecklistField[] | ((prev: ChecklistField[]) => ChecklistField[])) => {
     onChange(prev => {
-      const prevFields = prev[0]?.fields ?? [];
-      const prevId = prev[0]?.id ?? sectionId;
-      const nextFields = typeof updater === 'function' ? updater(prevFields) : updater;
-      return [{ id: prevId, title: '', fields: nextFields }];
+      const first = prev[0] ?? { id: sectionId, title: '', fields: [] };
+      const nextFields = typeof updater === 'function' ? updater(first.fields ?? []) : updater;
+      return [{ ...first, fields: nextFields }, ...prev.slice(1)];
     });
   }, [onChange, sectionId]);
 
   const updateField = useCallback((id: string, patch: Partial<ChecklistField>) =>
     setFields(prev => prev.map(f => f.id === id ? { ...f, ...patch } : f)), [setFields]);
 
+  // Deleting a field also cleans it out of every logic rule — dangling
+  // references used to lock "show" targets hidden forever.
   const removeField = useCallback((id: string) =>
-    setFields(prev => prev.filter(f => f.id !== id)), [setFields]);
+    setFields(prev => prev
+      .filter(f => f.id !== id)
+      .map(f => {
+        if (f.type !== 'logic') {
+          return f.conditionalOn === id ? { ...f, conditionalOn: undefined, conditionalValue: undefined } : f;
+        }
+        const conds = (f.logicConditions ?? []).filter(c => c.fieldId !== id);
+        const targets = (f.logicTargets ?? []).filter(t => t !== id);
+        return { ...f, logicConditions: conds, logicTargets: targets };
+      })
+    ), [setFields]);
 
   const moveField = useCallback((idx: number, dir: -1 | 1) => {
     setFields(prev => {
@@ -827,12 +867,19 @@ export default function ChecklistBuilder({
     });
   }, [setFields]);
 
-  // Add new block after a given index (or at end)
+  // Add new block after a given index (or at end).
+  // Logic blocks get their defaults STAMPED at creation — the editor's
+  // Show/Hide toggle renders "Show" pre-selected from a display default, so
+  // without stamping, logicAction never gets written and the engine used to
+  // treat the rule as a no-op.
   const addBlock = useCallback((afterIdx: number, type: FieldType = 'paragraph') => {
     const newId = uid();
+    const base: ChecklistField = type === 'logic'
+      ? { id: newId, type, label: '', logicAction: 'show', logicOperator: 'and', logicConditions: [], logicTargets: [] }
+      : { id: newId, type, label: '' };
     setFields(prev => {
       const next = [...prev];
-      next.splice(afterIdx + 1, 0, { id: newId, type, label: '' });
+      next.splice(afterIdx + 1, 0, base);
       return next;
     });
     return newId;
@@ -897,6 +944,20 @@ export default function ChecklistBuilder({
   const [showPreview, setShowPreview] = useState(false);
   const [previewResponses, setPreviewResponses] = useState<FieldResponse[]>([]);
 
+  // Match the staff app: date/time fields arrive pre-filled with today/now,
+  // which also drives conditional logic identically in both previews
+  const buildPreviewResponses = useCallback((): FieldResponse[] => {
+    const now = new Date();
+    const today = now.toISOString().split('T')[0];
+    const time = now.toTimeString().slice(0, 5);
+    const resp: FieldResponse[] = [];
+    sections.forEach(s => s.fields.forEach(f => {
+      if (f.type === 'date') resp.push({ field_id: f.id, value: today, na: false });
+      if (f.type === 'time') resp.push({ field_id: f.id, value: time, na: false });
+    }));
+    return resp;
+  }, [sections]);
+
   // ── Save-as-new modal ────────────────────────────────────────────────────
   const [showSaveAsNew, setShowSaveAsNew] = useState(false);
   const [saveAsNewName, setSaveAsNewName] = useState('');
@@ -904,7 +965,7 @@ export default function ChecklistBuilder({
   // Open preview when parent increments triggerPreview
   useEffect(() => {
     if (!triggerPreview) return;
-    setPreviewResponses([]);
+    setPreviewResponses(buildPreviewResponses());
     setShowPreview(true);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [triggerPreview]);
@@ -977,21 +1038,25 @@ export default function ChecklistBuilder({
     updateField(field.id, { label: value });
   }, [slashState, updateField]);
 
-  // selectSlashType — handles both block-level and ghost slash selections
+  // selectSlashType — handles both block-level and ghost slash selections.
+  // Logic blocks always get their defaults stamped (see addBlock).
   const selectSlashType = useCallback((type: FieldType) => {
     if (!slashState) return;
     const { blockId, prefix } = slashState;
+    const logicDefaults = type === 'logic'
+      ? { logicAction: 'show' as const, logicOperator: 'and' as const, logicConditions: [], logicTargets: [] }
+      : {};
 
     if (blockId === GHOST_ID) {
       // Create a brand-new block from the ghost
       const newId = uid();
-      setFields(prev => [...prev, { id: newId, type, label: prefix }]);
+      setFields(prev => [...prev, { id: newId, type, label: prefix, ...logicDefaults }]);
       setGhostValue('');
       setSlashState(null);
       focusBlock(newId);
     } else {
       // Change an existing block's type
-      updateField(blockId, { type, label: prefix, options: undefined, conditionalOn: undefined, conditionalValue: undefined });
+      updateField(blockId, { type, label: prefix, options: undefined, conditionalOn: undefined, conditionalValue: undefined, ...logicDefaults });
       setSlashState(null);
       focusBlock(blockId);
     }
@@ -1062,7 +1127,7 @@ export default function ChecklistBuilder({
           <input value={name} onChange={e => setName(e.target.value)}
             placeholder="Checklist name…"
             className="flex-1 text-sm font-bold text-text-primary placeholder-text-tertiary bg-transparent outline-none min-w-0"/>
-          <button onClick={() => { setPreviewResponses([]); setShowPreview(true); }}
+          <button onClick={() => { setPreviewResponses(buildPreviewResponses()); setShowPreview(true); }}
             className="shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-border-light text-xs font-semibold text-text-secondary hover:text-primary hover:border-primary hover:bg-primary/5 transition-all">
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/>
@@ -1113,8 +1178,17 @@ export default function ChecklistBuilder({
                   (draggingIdx > overIdx && field.id === overId)
                 );
 
+                // Is this field controlled by a fully-configured logic rule?
+                // Surfacing it here stops the "why is this always showing"
+                // confusion — conditional fields are labelled at a glance.
+                const controllingRule = field.type !== 'logic'
+                  ? fields.find(lb => lb.type === 'logic'
+                      && (lb.logicTargets || []).includes(field.id)
+                      && (lb.logicConditions || []).filter(isCompleteLogicCondition).length > 0)
+                  : undefined;
+
                 return (
-                  <div key={field.id}>
+                  <div key={field.id} className="relative">
                     {/* Drop indicator line — shown above the target slot */}
                     {showLineAbove && (
                       <div className="relative h-0.5 mx-2 my-0.5 overflow-visible">
@@ -1122,6 +1196,14 @@ export default function ChecklistBuilder({
                           style={{ boxShadow: '0 0 6px 1px rgba(99,102,241,0.5)' }}/>
                         <div className="absolute -left-1 -top-1 w-2.5 h-2.5 rounded-full bg-primary border-2 border-white"
                           style={{ boxShadow: '0 0 4px rgba(99,102,241,0.6)' }}/>
+                      </div>
+                    )}
+                    {controllingRule && (
+                      <div className="absolute -top-1 right-3 z-10 flex items-center gap-1 px-2 py-0.5 rounded-full bg-violet-100 border border-violet-300 pointer-events-none">
+                        <span className="text-[9px]">⚡</span>
+                        <span className="text-[9px] font-bold text-violet-700 uppercase tracking-wide">
+                          {(controllingRule.logicAction ?? 'show') === 'hide' ? 'Hidden by rule' : 'Shown by rule'}
+                        </span>
                       </div>
                     )}
                     <SortableBlock

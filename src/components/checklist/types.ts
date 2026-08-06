@@ -106,19 +106,28 @@ export function evalLogicCondition(
   responses: { field_id: string; value: string | string[] | boolean | null; na: boolean }[]
 ): boolean {
   const resp = responses.find(r => r.field_id === cond.fieldId);
-  const raw = resp?.value ?? null;
+  // A field marked N/A counts as unanswered for logic purposes
+  const raw = resp?.na ? null : (resp?.value ?? null);
   switch (cond.operator) {
     case 'is_answered':
-      return raw !== null && raw !== '' && !(Array.isArray(raw) && raw.length === 0);
+      // false (an unticked checkbox) is NOT an answer — this must agree with
+      // how progress counting and required-field validation treat it
+      return raw !== null && raw !== '' && raw !== false && !(Array.isArray(raw) && raw.length === 0);
     case 'is_empty':
-      return raw === null || raw === '' || (Array.isArray(raw) && raw.length === 0);
+      return raw === null || raw === '' || raw === false || (Array.isArray(raw) && raw.length === 0);
     case 'equals':
     case 'not_equals': {
-      let s: string | null = null;
-      if (typeof raw === 'string') s = raw;
-      else if (typeof raw === 'boolean') s = raw ? 'yes' : 'no';
-      else if (Array.isArray(raw)) s = raw[0] ?? null;
-      const match = s === cond.value;
+      // Multi-select answers match when ANY selected option equals the value —
+      // comparing only the first pick made the rule depend on tap order
+      let match: boolean;
+      if (Array.isArray(raw)) {
+        match = raw.includes(cond.value ?? '');
+      } else {
+        let s: string | null = null;
+        if (typeof raw === 'string') s = raw;
+        else if (typeof raw === 'boolean') s = raw ? 'yes' : 'no';
+        match = s === cond.value;
+      }
       return cond.operator === 'equals' ? match : !match;
     }
     case 'contains':
@@ -130,18 +139,44 @@ export function evalLogicCondition(
 }
 
 /** Build a map of fieldId → visible for all non-logic fields */
+/** A condition only counts once it's fully configured — a half-built rule
+ *  (no watched field, or a comparison with no value picked) must be ignored
+ *  rather than silently locking fields hidden or visible. */
+export function isCompleteLogicCondition(c: LogicCondition): boolean {
+  if (!c.fieldId) return false;
+  if (c.operator === 'is_answered' || c.operator === 'is_empty') return true;
+  return (c.value ?? '') !== '';
+}
+
 export function buildVisibilityMap(
   allFields: ChecklistField[],
   responses: { field_id: string; value: string | string[] | boolean | null; na: boolean }[]
 ): Record<string, boolean> {
-  const logicBlocks = allFields.filter(
-    f => f.type === 'logic' && (f.logicConditions?.length ?? 0) > 0 && (f.logicTargets?.length ?? 0) > 0
-  );
+  const fieldIds = new Set(allFields.map(f => f.id));
+  const logicBlocks = allFields
+    .map(f => f.type === 'logic'
+      ? {
+          ...f,
+          // Half-built conditions and conditions watching a DELETED field are
+          // ignored — otherwise a dangling reference can lock fields hidden
+          logicConditions: (f.logicConditions ?? []).filter(
+            c => isCompleteLogicCondition(c) && fieldIds.has(c.fieldId)
+          ),
+        }
+      : f)
+    .filter(
+      f => f.type === 'logic' && (f.logicConditions?.length ?? 0) > 0 && (f.logicTargets?.length ?? 0) > 0
+    );
 
-  // Fields targeted by a 'show' action are hidden by default
+  // Fields targeted by a 'show' action are hidden by default.
+  // logicAction MUST default to 'show' here: the builder's Show/Hide toggle
+  // renders "Show" pre-selected without writing the field, so most saved
+  // blocks carry logicAction: undefined — a strict === 'show' comparison
+  // silently turned every such rule into a no-op.
+  const actionOf = (lb: ChecklistField) => lb.logicAction ?? 'show';
   const hiddenByDefault = new Set<string>();
   for (const lb of logicBlocks) {
-    if (lb.logicAction === 'show') lb.logicTargets!.forEach(id => hiddenByDefault.add(id));
+    if (actionOf(lb) === 'show') lb.logicTargets!.forEach(id => hiddenByDefault.add(id));
   }
 
   const map: Record<string, boolean> = {};
@@ -168,8 +203,8 @@ export function buildVisibilityMap(
         ? conds.every(c => evalLogicCondition(c, responses))
         : conds.some(c => evalLogicCondition(c, responses));
 
-      if (lb.logicAction === 'show' && met) visible = true;
-      if (lb.logicAction === 'hide' && met) visible = false;
+      if (actionOf(lb) === 'show' && met) visible = true;
+      if (actionOf(lb) === 'hide' && met) visible = false;
     }
 
     map[field.id] = visible;
