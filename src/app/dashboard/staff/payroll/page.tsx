@@ -240,7 +240,8 @@ export default function PayrollPage() {
     // Get all jobs for the week's schedules
     const { data: allJobsData } = await supabase
       .from('schedule_jobs').select('*')
-      .in('schedule_id', scheduleIds);
+      .in('schedule_id', scheduleIds)
+      .order('start_time', { ascending: true, nullsFirst: false });
 
     if (allJobsData) {
       const myJobs = allJobsData.filter((j: any) => {
@@ -280,13 +281,7 @@ export default function PayrollPage() {
 
       const teamNamesSet = new Set<string>();
       let individualJobMinutes = 0;
-      
-      // We will also track which team this day primarily belongs to, 
-      // so we can pull their day_start_time to calculate travel to the first job.
-      let primaryTeamId: string | null = null;
 
-      // We will also track the saved travel minutes for this day's schedule
-      let savedTravelMinutes = 0;
       let dayDistanceKm = 0;
       let dayKmAllowance = 0;
 
@@ -296,67 +291,55 @@ export default function PayrollPage() {
         individualJobMinutes += (j.duration_minutes || 0) / tSize;
         if (schedData?.teamId && teams[schedData.teamId]) {
           teamNamesSet.add(teams[schedData.teamId].name);
-          if (!primaryTeamId) primaryTeamId = schedData.teamId;
-        }
-        if (schedData?.totalTravelMinutes) {
-          savedTravelMinutes = Math.max(savedTravelMinutes, schedData.totalTravelMinutes);
-        }
-        // Only include KM if this team has calculate_fuel ON and this staff is the driver
-        if (schedData?.calculateFuel && schedData.totalDistanceKm && schedData.driverStaffId === selectedStaffId) {
-          const km = schedData.totalDistanceKm;
-          dayDistanceKm = Math.max(dayDistanceKm, km);
-          dayKmAllowance = Math.max(dayKmAllowance, km * schedData.perKmRate);
         }
       });
 
-      // Use the schedule's saved base departure time when it's earlier
-      // than the first job start. This accounts for travel from base to the
-      // first job, especially when a pinned start time is set.
+      // Day start for display: the earliest per-run anchor — a run's base
+      // departure counts when earlier than its own first job. Derived the
+      // same way as travel below so the two never contradict each other.
       let firstStart = firstJobStart;
-      if (primaryTeamId && firstJobStart) {
-        // Find the base departure time from the schedule record for this team/day
-        for (const j of dayJobs) {
-          const sd = scheduleDataMap.get(j.schedule_id);
-          if (sd?.teamId === primaryTeamId && sd.baseDepartureTime) {
-            if (sd.baseDepartureTime < firstJobStart) {
-              firstStart = sd.baseDepartureTime;
-            }
-            break;
-          }
-        }
-      }
 
-      // Calculate pure travel time from gaps as a fallback.
-      // Anchor at the day's actual departure (base_departure_time, already
-      // min'd with the first job start above) — NOT the team's nominal
-      // day_start_time, which fabricates hours of "travel" on days that
-      // start later at the first job (e.g. no start base + pinned start).
+      // Travel and kms belong to a team's RUN (schedule), not the merged day.
+      // Someone on two runs in one day (e.g. a midday and an evening team)
+      // must not have the idle hours BETWEEN runs counted as travel, so each
+      // schedule is totalled independently and the results summed.
       let travelMinutes = 0;
-      let lastEndTracker = 0;
-
-      if (firstStart) {
-        lastEndTracker = parseTimeToMinutes(firstStart);
-      } else if (primaryTeamId && teams[primaryTeamId]?.dayStartTime) {
-         lastEndTracker = parseTimeToMinutes(teams[primaryTeamId].dayStartTime!);
-      }
-
-      // Sort jobs and breaks by start time to find the true travel gaps
-      const allSorted = [...dayJobs, ...dayBreaks]
+      const timedForDay = [...dayJobs, ...dayBreaks]
         .filter(j => j.start_time && j.end_time)
         .sort((a, b) => parseTimeToMinutes(a.start_time) - parseTimeToMinutes(b.start_time));
 
-      allSorted.forEach(j => {
-        const sTime = parseTimeToMinutes(j.start_time);
-        if (lastEndTracker > 0 && sTime > lastEndTracker) {
-           travelMinutes += (sTime - lastEndTracker);
+      [...new Set(allForDay.map(j => j.schedule_id))].forEach(schedId => {
+        const sd = scheduleDataMap.get(schedId);
+        // Driver kms, when the team tracks fuel
+        if (sd?.calculateFuel && sd.totalDistanceKm && sd.driverStaffId === selectedStaffId) {
+          dayDistanceKm += sd.totalDistanceKm;
+          dayKmAllowance += sd.totalDistanceKm * sd.perKmRate;
         }
-        lastEndTracker = parseTimeToMinutes(j.end_time);
+        const runJobs = timedForDay.filter(j => j.schedule_id === schedId);
+        // This run's start: its own base departure when earlier than its
+        // first job. The day's Start is the earliest run start.
+        let anchor: string | null = runJobs.length > 0 ? runJobs[0].start_time : null;
+        if (sd?.baseDepartureTime && (!anchor || parseTimeToMinutes(sd.baseDepartureTime) < parseTimeToMinutes(anchor))) {
+          anchor = sd.baseDepartureTime;
+        }
+        if (anchor && runJobs.length > 0 && (!firstStart || parseTimeToMinutes(anchor) < parseTimeToMinutes(firstStart))) {
+          firstStart = anchor;
+        }
+        // The run's saved Google Maps travel time wins over the gap fallback
+        if (sd?.totalTravelMinutes) {
+          travelMinutes += sd.totalTravelMinutes;
+          return;
+        }
+        // Fallback: infer travel from gaps between jobs WITHIN this run only
+        if (!anchor || runJobs.length === 0) return;
+        let tracker = parseTimeToMinutes(anchor);
+        runJobs.forEach(j => {
+          const sTime = parseTimeToMinutes(j.start_time);
+          if (sTime > tracker) travelMinutes += sTime - tracker;
+          tracker = Math.max(tracker, parseTimeToMinutes(j.end_time));
+        });
       });
-      
-      // Use the saved Google Maps travel time if available, otherwise fallback to the timeline gap calculation
-      if (savedTravelMinutes > 0) {
-        travelMinutes = savedTravelMinutes;
-      }
+
       
       const workMinutes = individualJobMinutes + travelMinutes;
 
