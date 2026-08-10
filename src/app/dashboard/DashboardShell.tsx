@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
+import BrandMark from '@/components/BrandMark';
 import { usePathname, useRouter } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
 import { AuthProvider, useAuth } from '@/lib/hooks/useAuth';
@@ -494,12 +495,7 @@ function Inner({ children }: { children: React.ReactNode }) {
 function Logo() {
   return (
     <div className="flex items-center gap-2 shrink-0">
-      <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-primary to-primary-hover flex items-center justify-center shadow-sm">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5">
-          <path d="M12 22s-8-4.5-8-11.8A8 8 0 0 1 12 2a8 8 0 0 1 8 8.2c0 7.3-8 11.8-8 11.8z"/>
-          <circle cx="12" cy="10" r="3"/>
-        </svg>
-      </div>
+      <BrandMark size={32} className="shadow-sm rounded-xl" />
       <span className="text-sm font-bold text-text-primary hidden sm:block">CleanRoute</span>
     </div>
   );

@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { useRouter } from 'next/navigation';
 import { motion } from 'framer-motion';
+import BrandMark from '@/components/BrandMark';
 
 export default function LoginPage() {
   const supabase = createClient();
@@ -28,12 +29,7 @@ export default function LoginPage() {
         className="w-full max-w-[420px]">
         <div className="card-elevated p-8">
           <div className="text-center mb-8">
-            <div className="w-14 h-14 rounded-2xl bg-primary flex items-center justify-center mx-auto mb-4">
-              <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5">
-                <path d="M12 22s-8-4.5-8-11.8A8 8 0 0 1 12 2a8 8 0 0 1 8 8.2c0 7.3-8 11.8-8 11.8z" />
-                <circle cx="12" cy="10" r="3" />
-              </svg>
-            </div>
+            <BrandMark size={56} className="mx-auto mb-4" />
             <h1 className="text-2xl font-bold text-text-primary">CleanRoute Pro</h1>
             <p className="text-sm text-text-secondary mt-1">Sign in to your account</p>
           </div>
@@ -66,6 +62,11 @@ export default function LoginPage() {
           <p className="text-center text-sm text-text-tertiary mt-6">
             Don&apos;t have an account?{' '}
             <a href="/register" className="text-primary font-medium hover:underline">Create one</a>
+          </p>
+          <p className="text-center text-xs text-text-tertiary mt-3">
+            New here?{' '}
+            <a href="/help" className="text-primary font-medium hover:underline">Read the guides</a>
+            {' '}— no account needed
           </p>
         </div>
       </motion.div>

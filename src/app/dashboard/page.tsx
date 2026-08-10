@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useMemo, useCallback } from 'react';
+import BrandMark from '@/components/BrandMark';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useAuth } from '@/lib/hooks/useAuth';
 import { createClient } from '@/lib/supabase/client';
@@ -345,12 +346,7 @@ export default function DashboardHomePage() {
 
               {/* No Org State */}
               <div className="card-elevated p-8 text-center">
-                <div className="w-20 h-20 rounded-2xl bg-gradient-to-br from-primary/10 to-primary/5 flex items-center justify-center mx-auto mb-6">
-                  <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="var(--color-primary)" strokeWidth="1.5">
-                    <path d="M12 22s-8-4.5-8-11.8A8 8 0 0 1 12 2a8 8 0 0 1 8 8.2c0 7.3-8 11.8-8 11.8z"/>
-                    <circle cx="12" cy="10" r="3"/>
-                  </svg>
-                </div>
+                <BrandMark size={80} className="mx-auto mb-6" />
                 <h1 className="text-2xl font-bold text-text-primary mb-2">Welcome to CleanRoute Pro</h1>
                 <p className="text-sm text-text-secondary leading-relaxed max-w-sm mx-auto mb-8">
                   You're not part of any organisation yet. Create your own business or join an existing one.
