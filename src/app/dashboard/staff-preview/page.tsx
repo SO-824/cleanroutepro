@@ -8,6 +8,12 @@ import { createClient } from '@/lib/supabase/client';
 import StaffPortalPage from '../staff-view/page';
 import SchedulePage from '../schedule/page';
 import CompletedPage from '../completed/page';
+// The "Clients" nav item routes to /dashboard/checklists in DashboardShell
+import ChecklistsPage from '../checklists/page';
+import TemplatesPage from '../templates/page';
+import StaffPage from '../staff/page';
+import SettingsPage from '../settings/page';
+import HelpPage from '../help/page';
 
 interface PreviewAccount {
   staffId: string;
@@ -23,9 +29,10 @@ const ROLE_LABELS: Record<string, { label: string; color: string; bg: string; bo
   staff:       { label: 'Staff',       color: 'text-emerald-700', bg: 'bg-emerald-50', border: 'border-emerald-200' },
 };
 
-const ADMIN_NAV = ['Schedule', 'Completed', 'Clients', 'Templates', 'Staff', 'Staff View', 'Settings'];
-const SUPERVISOR_NAV = ['My Schedule', 'Published Schedules'];
-const STAFF_NAV = ['My Schedule'];
+// Must mirror the labels in DashboardShell's nav for each role
+const ADMIN_NAV = ['Schedule', 'Completed', 'Clients', 'Templates', 'Staff', 'Staff View', 'Org Settings', 'Help'];
+const SUPERVISOR_NAV = ['My Schedule', 'Published Schedules', 'Help'];
+const STAFF_NAV = ['My Schedule', 'Help'];
 
 export default function StaffPreviewPage() {
   const { profile, loading: authLoading } = useAuth();
@@ -209,7 +216,7 @@ export default function StaffPreviewPage() {
         <AnimatePresence mode="wait">
           {selectedAccount ? (
             <motion.div
-              key={`${selectedStaffId}-${selectedAccount.role}`}
+              key={`${selectedStaffId}-${selectedAccount.role}-${activeTab}`}
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
@@ -218,8 +225,30 @@ export default function StaffPreviewPage() {
             >
               {activeTab === 'My Schedule' ? (
                 <StaffPortalPage overrideStaffId={selectedStaffId} overrideStaffName={selectedAccount.name} />
-              ) : activeTab === 'Published Schedules' ? (
+              ) : activeTab === 'Completed' || activeTab === 'Published Schedules' ? (
                 <CompletedPage />
+              ) : activeTab === 'Clients' ? (
+                <ChecklistsPage />
+              ) : activeTab === 'Templates' ? (
+                <TemplatesPage />
+              ) : activeTab === 'Staff' ? (
+                <StaffPage />
+              ) : activeTab === 'Org Settings' ? (
+                <SettingsPage overrideRole={selectedAccount.role} />
+              ) : activeTab === 'Help' ? (
+                <HelpPage />
+              ) : activeTab === 'Staff View' ? (
+                <div className="h-full flex flex-col items-center justify-center px-6 text-center">
+                  <div className="w-14 h-14 rounded-2xl bg-primary-light flex items-center justify-center mb-3">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#4F46E5" strokeWidth="2">
+                      <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/>
+                    </svg>
+                  </div>
+                  <p className="text-base font-bold text-text-primary">Staff View is this tool</p>
+                  <p className="text-sm text-text-secondary mt-1 max-w-xs">
+                    {selectedAccount.name} sees the same preview tool you&apos;re using right now.
+                  </p>
+                </div>
               ) : (
                 <SchedulePage overrideRole={selectedAccount.role} />
               )}
