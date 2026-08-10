@@ -1,15 +1,28 @@
 'use client';
 
-import { useState, useMemo, useEffect } from 'react';
+import { useState, useMemo, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { motion } from 'framer-motion';
 import { useAuth } from '@/lib/hooks/useAuth';
 import HelpTip from '@/components/HelpTip';
+import { RouteGlyph } from '@/components/BrandMark';
 import { createClient } from '@/lib/supabase/client';
 import { getAppTimezone, setAppTimezone, TIMEZONE_OPTIONS } from '@/lib/timezone';
 
-export default function SettingsPage() {
+// Mirrors the "org-assets" bucket limits — the bucket rejects anything else server-side.
+const LOGO_MAX_BYTES = 2 * 1024 * 1024;
+// PNG/JPG only: SVG and WebP upload fine but render as broken images in
+// Gmail and Outlook, where the report emails actually land.
+const LOGO_MIME_EXT: Record<string, string> = {
+  'image/png': 'png',
+  'image/jpeg': 'jpg',
+};
+
+export default function SettingsPage({ overrideRole }: { overrideRole?: 'owner' | 'admin' | 'supervisor' | 'staff' }) {
   const { profile, refreshProfile } = useAuth();
+  // Staff View preview passes the previewed member's role so owner-only
+  // sections show/hide as they would for that person
+  const effectiveRole = overrideRole ?? profile?.role;
   const router = useRouter();
   const supabase = useMemo(() => createClient(), []);
 
@@ -42,6 +55,15 @@ export default function SettingsPage() {
   const [payrollSaving, setPayrollSaving] = useState(false);
   const [payrollSaved, setPayrollSaved] = useState(false);
 
+  // Company logo — logo_path is the storage key, kept so the old file can be
+  // deleted when the logo is replaced or removed.
+  const [logoUrl, setLogoUrl] = useState<string | null>(null);
+  const [logoPath, setLogoPath] = useState<string | null>(null);
+  const [logoBusy, setLogoBusy] = useState(false);
+  const [logoSaved, setLogoSaved] = useState(false);
+  const [logoError, setLogoError] = useState<string | null>(null);
+  const logoInputRef = useRef<HTMLInputElement>(null);
+
   // Sync timezone state when profile loads
   useEffect(() => {
     setTimezone(getAppTimezone());
@@ -52,7 +74,7 @@ export default function SettingsPage() {
     if (!profile?.org_id) return;
     supabase
       .from('organizations')
-      .select('default_fuel_efficiency, default_fuel_price, default_per_km_rate, payroll_cycle_start_day')
+      .select('default_fuel_efficiency, default_fuel_price, default_per_km_rate, payroll_cycle_start_day, logo_url, logo_path')
       .eq('id', profile.org_id)
       .single()
       .then(({ data }: { data: any }) => {
@@ -63,6 +85,8 @@ export default function SettingsPage() {
             default_per_km_rate: Number(data.default_per_km_rate) || 0,
           });
           setPayrollStartDay(data.payroll_cycle_start_day ?? 1);
+          setLogoUrl(data.logo_url ?? null);
+          setLogoPath(data.logo_path ?? null);
         }
       });
   }, [supabase, profile?.org_id]);
@@ -101,6 +125,89 @@ export default function SettingsPage() {
     setTimeout(() => setDefaultsSaved(false), 2000);
   };
 
+  const handleLogoPick = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !profile?.org_id) return;
+    setLogoError(null);
+
+    const resetInput = () => { if (logoInputRef.current) logoInputRef.current.value = ''; };
+
+    if (!LOGO_MIME_EXT[file.type]) {
+      setLogoError('That file is not a supported image. Use a PNG or JPG — other formats do not display in email apps like Gmail and Outlook.');
+      resetInput();
+      return;
+    }
+    if (file.size > LOGO_MAX_BYTES) {
+      setLogoError(`That file is ${(file.size / 1024 / 1024).toFixed(1)} MB — the limit is 2 MB. Please use a smaller image.`);
+      resetInput();
+      return;
+    }
+
+    setLogoBusy(true);
+    const previousPath = logoPath;
+    try {
+      const dot = file.name.lastIndexOf('.');
+      const rawExt = dot >= 0 ? file.name.slice(dot + 1).toLowerCase().replace(/[^a-z0-9]/g, '') : '';
+      const ext = rawExt || LOGO_MIME_EXT[file.type];
+      const path = `${profile.org_id}/logo-${Date.now()}.${ext}`;
+
+      const { error: uploadError } = await supabase.storage.from('org-assets').upload(path, file);
+      if (uploadError) {
+        setLogoError(`Upload failed: ${uploadError.message}`);
+        return;
+      }
+
+      const publicUrl = supabase.storage.from('org-assets').getPublicUrl(path).data.publicUrl;
+      const { error: updateError } = await supabase
+        .from('organizations')
+        .update({ logo_url: publicUrl, logo_path: path })
+        .eq('id', profile.org_id);
+
+      if (updateError) {
+        // The row never saved, so bin the upload instead of orphaning it.
+        await supabase.storage.from('org-assets').remove([path]);
+        setLogoError(`Could not save the logo: ${updateError.message}`);
+        return;
+      }
+
+      setLogoUrl(publicUrl);
+      setLogoPath(path);
+      // Only safe once the new row is committed — never before.
+      if (previousPath && previousPath !== path) {
+        await supabase.storage.from('org-assets').remove([previousPath]);
+      }
+      setLogoSaved(true);
+      setTimeout(() => setLogoSaved(false), 2000);
+    } finally {
+      setLogoBusy(false);
+      resetInput();
+    }
+  };
+
+  const handleRemoveLogo = async () => {
+    if (!profile?.org_id || !logoPath) return;
+    if (!confirm('Remove your logo? Checklist reports emailed to clients will no longer show it.')) return;
+    setLogoBusy(true);
+    setLogoError(null);
+    const previousPath = logoPath;
+    const { error } = await supabase
+      .from('organizations')
+      .update({ logo_url: null, logo_path: null })
+      .eq('id', profile.org_id);
+
+    if (error) {
+      setLogoError(`Could not remove the logo: ${error.message}`);
+      setLogoBusy(false);
+      return;
+    }
+    await supabase.storage.from('org-assets').remove([previousPath]);
+    setLogoUrl(null);
+    setLogoPath(null);
+    setLogoBusy(false);
+    setLogoSaved(true);
+    setTimeout(() => setLogoSaved(false), 2000);
+  };
+
   const handleSavePayrollCycle = async () => {
     if (!profile?.org_id) return;
     setPayrollSaving(true);
@@ -135,6 +242,59 @@ export default function SettingsPage() {
           </div>
         </div>
 
+        {/* ── Company Logo ────────────────────────────────────────────────── */}
+        {effectiveRole === 'owner' && (
+        <div className="card-elevated p-5 space-y-4">
+          <div>
+            <div className="flex items-center gap-1.5">
+              <h3 className="text-sm font-bold text-text-primary">Company Logo</h3>
+              <HelpTip tip="Your logo appears at the top of the checklist report emails sent to clients." article="checklist-workflow" />
+            </div>
+            <p className="text-xs text-text-tertiary mt-0.5">
+              This logo is shown at the top of every checklist report email your clients receive.
+              A wide (landscape) PNG with a transparent or white background looks best — it appears about 160px wide in the email.
+            </p>
+          </div>
+
+          {/* White preview background: the email shows the logo on white, so dark
+              logos and transparent PNGs must be judged against white here too. */}
+          {logoUrl ? (
+            <div className="rounded-xl border border-border-light bg-white p-4 flex items-center justify-center">
+              <img src={logoUrl} alt="Company logo" className="max-h-14 w-auto object-contain" />
+            </div>
+          ) : (
+            <div className="rounded-xl border border-dashed border-border-light bg-white p-6 text-center">
+              <p className="text-xs text-text-tertiary">
+                No logo yet. Upload one to brand the checklist reports emailed to your clients.
+              </p>
+            </div>
+          )}
+
+          {logoError && (
+            <p className="text-xs text-danger">{logoError}</p>
+          )}
+
+          <input
+            ref={logoInputRef}
+            type="file"
+            accept="image/png,image/jpeg"
+            onChange={handleLogoPick}
+            className="hidden"
+          />
+
+          <div className="flex items-center gap-2">
+            <button onClick={() => logoInputRef.current?.click()} disabled={logoBusy} className="btn-primary text-sm">
+              {logoBusy ? 'Working...' : logoUrl ? 'Replace Logo' : 'Upload Logo'}
+            </button>
+            {logoUrl && (
+              <button onClick={handleRemoveLogo} disabled={logoBusy} className="btn-secondary text-sm">Remove</button>
+            )}
+            {logoSaved && <motion.span initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="text-sm text-success font-medium">✓ Saved</motion.span>}
+          </div>
+          <p className="text-[11px] text-text-tertiary">PNG or JPG — up to 2 MB.</p>
+        </div>
+        )}
+
         {/* Timezone Setting */}
         <div className="card-elevated p-5 space-y-4">
           <div>
@@ -167,7 +327,7 @@ export default function SettingsPage() {
         </div>
 
         {/* ── Scheduling Defaults ─────────────────────────────────────────── */}
-        {profile?.role === 'owner' && (
+        {effectiveRole === 'owner' && (
         <div className="card-elevated p-5 space-y-4">
           <div>
             <h3 className="text-sm font-bold text-text-primary">Scheduling Defaults</h3>
@@ -233,7 +393,7 @@ export default function SettingsPage() {
         )}
 
         {/* ── Payroll Settings ────────────────────────────────────────────── */}
-        {profile?.role === 'owner' && (
+        {effectiveRole === 'owner' && (
         <div className="card-elevated p-5 space-y-4">
           <div>
             <h3 className="text-sm font-bold text-text-primary">Payroll Settings</h3>
@@ -301,7 +461,7 @@ export default function SettingsPage() {
           <a href="/admin" className="block card-elevated p-5 hover:border-primary transition-colors group">
             <div className="flex items-center gap-3">
               <div className="w-10 h-10 rounded-xl bg-primary-light flex items-center justify-center text-primary group-hover:bg-primary group-hover:text-white transition-colors">
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 22s-8-4.5-8-11.8A8 8 0 0 1 12 2a8 8 0 0 1 8 8.2c0 7.3-8 11.8-8 11.8z"/><circle cx="12" cy="10" r="3"/></svg>
+                <RouteGlyph size={18} />
               </div>
               <div><h4 className="text-sm font-bold text-text-primary">Platform Admin</h4><p className="text-xs text-text-tertiary">View all tenants and manage the platform</p></div>
             </div>
