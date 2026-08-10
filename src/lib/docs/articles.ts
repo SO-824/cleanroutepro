@@ -49,7 +49,7 @@ New staff are recorded with the role of cleaner, and their availability starts a
 
 Before you can invite someone, they must create their own CleanRoute Pro account:
 
-1. Ask them to go to the CleanRoute Pro website at [cleanroutepro.vercel.app](https://cleanroutepro.vercel.app/) and open the registration page.
+1. Ask them to go to the CleanRoute Pro website at [cleanroutepro.com.au](https://cleanroutepro.com.au/) and open the registration page.
 
 2. They fill in **Email** (the same address you put on the roster), **Password** and **Confirm Password**, then click **Create Account**.
 
@@ -138,7 +138,7 @@ Welcome to the team! CleanRoute Pro is where you will find your cleaning schedul
 
 Before your manager can invite you, you need your own CleanRoute Pro account.
 
-1. Open the CleanRoute Pro website: [cleanroutepro.vercel.app](https://cleanroutepro.vercel.app/)
+1. Open the CleanRoute Pro website: [cleanroutepro.com.au](https://cleanroutepro.com.au/)
 
 2. On the sign-in page, press the **Create one** link under the sign-in form.
 
@@ -206,7 +206,7 @@ There is no separate app to download. The staff view IS the website, designed fo
 
 1. Open your phone's web browser (Safari, Chrome or similar).
 
-2. Go to the CleanRoute Pro website: [cleanroutepro.vercel.app](https://cleanroutepro.vercel.app/)
+2. Go to the CleanRoute Pro website: [cleanroutepro.com.au](https://cleanroutepro.com.au/)
 
 3. Sign in with your email and password.
 
@@ -218,7 +218,7 @@ Adding CleanRoute Pro to your phone's home screen gives you an app icon that ope
 
 ### iPhone or iPad (Safari)
 
-1. Open [cleanroutepro.vercel.app](https://cleanroutepro.vercel.app/) in Safari and log in.
+1. Open [cleanroutepro.com.au](https://cleanroutepro.com.au/) in Safari and log in.
 
 2. Tap the **Share** button — the square with an arrow pointing up, in the middle of the bar at the bottom of the screen.
 
@@ -232,7 +232,7 @@ The icon now sits on your home screen like any other app. Tapping it opens strai
 
 ### Android (Chrome)
 
-1. Open [cleanroutepro.vercel.app](https://cleanroutepro.vercel.app/) in Chrome and log in.
+1. Open [cleanroutepro.com.au](https://cleanroutepro.com.au/) in Chrome and log in.
 
 2. Tap the three-dot menu in the top-right corner.
 
@@ -1290,7 +1290,7 @@ CleanRoute Pro does not send invitation emails. The invite appears inside the ap
 
 If the person cannot see the invite card, work through these causes.
 
-1. They have not registered yet. The person must create their own account at [cleanroutepro.vercel.app](https://cleanroutepro.vercel.app/) first. If they have no account, the admin sees an error saying the user was not found and to ask them to create an account first, then invite again.
+1. They have not registered yet. The person must create their own account at [cleanroutepro.com.au](https://cleanroutepro.com.au/) first. If they have no account, the admin sees an error saying the user was not found and to ask them to create an account first, then invite again.
 
 2. They registered with a different email address. The invite is matched to the exact email the admin typed. Check both sides for typos, and check which address the person actually registered with — it is shown on their welcome screen.
 

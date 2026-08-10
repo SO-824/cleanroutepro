@@ -40,6 +40,30 @@ type Block =
   | { type: 'h2' | 'h3' | 'p' | 'callout'; text: string }
   | { type: 'ul' | 'ol'; items: string[] };
 
+// Articles separate list items with blank lines, so a list only ends when the
+// next non-blank line is NOT an item — otherwise every numbered step would
+// become its own single-item list and render as "1." every time.
+function collectList(
+  lines: string[], start: number,
+  isItem: (t: string) => boolean, strip: (t: string) => string,
+  setIndex: (n: number) => void,
+): string[] {
+  const items: string[] = [];
+  let i = start;
+  while (i < lines.length) {
+    const t = lines[i].trim();
+    if (isItem(t)) { items.push(strip(t)); i++; continue; }
+    if (t === '') {
+      let j = i;
+      while (j < lines.length && lines[j].trim() === '') j++;
+      if (j < lines.length && isItem(lines[j].trim())) { i = j; continue; }
+    }
+    break;
+  }
+  setIndex(i);
+  return items;
+}
+
 function parseBlocks(content: string): Block[] {
   const lines = content.split('\n');
   const blocks: Block[] = [];
@@ -66,19 +90,9 @@ function parseBlocks(content: string): Block[] {
       }
       blocks.push({ type: 'callout', text: parts.join(' ') });
     } else if (trimmed.startsWith('- ')) {
-      const items: string[] = [];
-      while (i < lines.length && lines[i].trim().startsWith('- ')) {
-        items.push(lines[i].trim().slice(2));
-        i++;
-      }
-      blocks.push({ type: 'ul', items });
+      blocks.push({ type: 'ul', items: collectList(lines, i, t => t.startsWith('- '), t => t.slice(2), n => { i = n; }) });
     } else if (/^\d+\.\s/.test(trimmed)) {
-      const items: string[] = [];
-      while (i < lines.length && /^\d+\.\s/.test(lines[i].trim())) {
-        items.push(lines[i].trim().replace(/^\d+\.\s/, ''));
-        i++;
-      }
-      blocks.push({ type: 'ol', items });
+      blocks.push({ type: 'ol', items: collectList(lines, i, t => /^\d+\.\s/.test(t), t => t.replace(/^\d+\.\s/, ''), n => { i = n; }) });
     } else {
       // Paragraph — consume consecutive plain lines
       const parts: string[] = [trimmed];

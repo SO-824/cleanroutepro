@@ -32,7 +32,9 @@ export async function updateSession(request: NextRequest) {
     data: { user },
   } = await supabase.auth.getUser();
 
-  const publicPaths = ['/', '/login', '/register', '/forgot-password'];
+  // /help is public so onboarding emails can link documentation to staff
+  // who don't have an account yet.
+  const publicPaths = ['/', '/login', '/register', '/forgot-password', '/help'];
   const isPublicPath = publicPaths.some(
     (path) => request.nextUrl.pathname === path
   );
