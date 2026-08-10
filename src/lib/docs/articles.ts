@@ -59,6 +59,10 @@ Before you can invite someone, they must create their own CleanRoute Pro account
 
 > If they click **Join an Organisation**, the screen simply shows their email address and explains they need an invitation from you. There is nothing else for them to do until you send the invite.
 
+### Share the guides — no login needed
+
+Every staff-facing guide, including the Staff Guide, is readable at [cleanroutepro.com.au/help](https://cleanroutepro.com.au/help) without an account — so you can paste the link (or the Staff Guide directly: [cleanroutepro.com.au/help?article=staff-onboarding-guide](https://cleanroutepro.com.au/help?article=staff-onboarding-guide)) straight into your onboarding email before the person has even registered. The sign-in page also links the guides under "Read the guides".
+
 ## Step 3: Send the invitation
 
 1. Back on your **Staff** page, find the person on the **Roster** tab.
@@ -291,7 +295,7 @@ Two things control what you see in the Schedule tab:
     id: "org-setup",
     title: "Organisation Settings",
     category: "Getting Started",
-    description: "Set your business name, timezone, fuel and mileage defaults, payroll cycle and subscription — and find the settings that live elsewhere.",
+    description: "Set your business name, company logo for client reports, timezone, fuel and mileage defaults, payroll cycle and subscription.",
     audience: "admin",
     content: `
 The Organisation Settings page is where you manage details that apply to your whole business: your business name, your timezone, default fuel and mileage figures, your payroll cycle and your subscription. Only owners and admins can open this page — staff who try are sent back to the Schedule. Two sections (Scheduling Defaults and Payroll Settings) are visible to the owner only.
@@ -309,6 +313,22 @@ This is your organisation's name as it appears across the app and on invitations
 1. Type the new name into the **Business Name** field.
 
 2. Click **Save Changes**. A green tick with **Saved** confirms it worked.
+
+## Company Logo (owner only)
+
+Upload your logo and it appears at the top of every checklist report emailed to clients.
+
+1. In the **Company Logo** card, press the upload button and pick a **PNG or JPG up to 2 MB**.
+
+2. The preview shows your logo on a white panel — the same background the email uses — so you can check it reads clearly.
+
+3. It saves immediately. The next report sent carries it; no republish needed.
+
+- A wide (landscape) logo with a transparent or white background looks best. It displays about 160px wide in the email.
+
+- Other formats such as SVG, WEBP or HEIC are rejected on purpose — they show as broken images in Gmail and Outlook, where your clients actually read email.
+
+- **Remove** takes the logo off future reports after a confirmation. With no logo set, reports simply open with your business name as text.
 
 ## Timezone
 
@@ -764,15 +784,35 @@ The bar at the top shows your progress, for example 7 of 12 completed. A few thi
 
 3. After submitting you'll see the **All done!** screen. The checklist is now locked — reopening it shows this screen, not the form.
 
-## Step 4: Email the report to the client (staff)
+## Step 4: Review and send the report (owner or admin)
 
-On the **All done!** screen, press **Email report to client**. Your phone opens its own email app with a draft already written for you: it is addressed to the client's email address, the subject line has the checklist name, client and date, and the body lists every question with its answer plus your notes. Check it over, then press send in your email app.
+Submitted checklists queue up at the top of the **Completed** page in a panel called **Review & send reports**.
 
-> CleanRoute Pro never sends emails by itself. The report leaves from the staff member's own email account, and only when they press send. If nobody presses the button, no email goes anywhere.
+1. Open **Completed** in the sidebar. The panel lists every submitted checklist for the week, newest first, each with an **Awaiting review** or **Sent** chip.
 
-- Want management to get a copy? Add the office address in the CC field of the email before you press send.
+2. Press **Review** to read the answers, photos and notes first — the same checklist panel described below.
 
-- An admin can send the report too — open the submitted checklist through **Staff View** and press the same button.
+3. Press **Send email**. A dialog opens with an **Email preview** showing exactly what will land in the client's inbox: your company logo, the client and date, every answer, and any staff notes, under a subject line like Cleaning report — 6 August 2026.
+
+4. Check the **To** address, add a CC if management wants a copy, then press **Approve & send**. The report is emailed to the client and the entry flips to **Sent**.
+
+- The report only includes questions that were visible under the checklist's show/hide rules — hidden conditional questions stay out, exactly as staff saw the form.
+
+- Every send is recorded: who approved it, when, and the exact address it went to. Sending twice is allowed — the dialog warns "this will send it again" first.
+
+> Nothing is emailed automatically. A report only leaves when an owner or admin presses **Approve & send**, so everything a client receives has been looked at by a person first.
+
+### Testing with your own inbox
+
+In the send dialog, switch off **Use the email on the client profile** and type any address — your own, for example. It saves automatically for that client, and reports keep going there until you switch the toggle back on. Handy while trialling the system; just remember to flip it back before real reports go out.
+
+### If no email service is connected
+
+Press **Approve & send** and the dialog switches to **Open in my mail app** instead: your own email app opens with the report prefilled, you press send there, then come back and press **I've sent it — mark as sent** so the record still shows Sent.
+
+### Staff can still send from site
+
+The **All done!** screen keeps its **Email report to client** button — it opens the staff member's own email app with a prefilled draft addressed to the client. Use whichever rhythm suits your business: office-approved sends from Completed, or straight-from-the-carpark sends by staff.
 
 ## Watching it happen live (admin)
 
@@ -782,11 +822,13 @@ You don't have to wait for the email. The **Completed** page shows every publish
 
 A rhythm that works well at the end of each day:
 
-1. Staff: submit the checklist before you drive off, while you're still at the site, then press **Email report to client** and send it. Details are freshest in the carpark, not at home.
+1. Staff: submit the checklist before you drive off, while you're still at the site. Details are freshest in the carpark, not at home.
 
 2. Admin: open **Completed** and check today's column — every job should show **Done**.
 
-3. Open anything still showing a percentage. The **Filled in by** pills and the "Waiting on" names tell you who to call.
+3. Open anything not yet showing **Done**. On in-progress jobs the **Filled in by** pills tell you who to call; on jobs still marked **Not started**, the "Waiting on" names do.
+
+4. Admin: work through **Review & send reports** — review each submitted checklist and press **Approve & send**. Aim to end the day with nothing left on **Awaiting review**.
 
 4. Read the **Staff Notes** on each submitted job — broken gear, access problems and client requests land there.
 
@@ -796,7 +838,7 @@ A rhythm that works well at the end of each day:
 
 - The **Email report to client** button doesn't appear. It only shows when the client has an email address saved. Open **Clients**, select the client, add their email address to the profile, then reopen the checklist.
 
-- The client says the report never arrived. It sends from the staff member's personal email app, not from the platform. Ask them to check the Sent folder in their email app — if it isn't there, the draft was never sent. Also double-check the client's email address on their profile.
+- The client says the report never arrived. Open **Completed**, press **Review** on the entry, and check the footer of the checklist panel — it shows exactly when the report went and to which address. If that address is wrong (or still a testing override), fix it and press **Send again**. If it went to the right address, ask the client to check their spam or promotions folder. If a staff member sent it from their own email app instead, ask them to check their Sent folder.
 
 - The checklist shows old answers after you switched the client to a different checklist. Progress is stored per job, so leftovers from the old checklist can hang around. Open the job on the **Completed** page and press **Reset progress** — after you confirm, the checklist goes back to blank for everyone. This permanently deletes the old answers, photos and notes.
 
@@ -951,7 +993,7 @@ The job card shows a green pill with the assigned checklist's name, or an amber 
     id: "checklist-review",
     title: "Reviewing Completed Checklists",
     category: "Checklists",
-    description: "How to use the Completed page to watch checklists live, review photos and notes, and reset progress when needed.",
+    description: "How to use the Completed page to watch checklists live, review photos and notes, email approved reports to clients, and reset progress when needed.",
     audience: "admin",
     content: `
 The **Completed** page is your control room for checklists. It shows every published job for a week, how far its checklist has come, who is filling it in, and every answer, photo and note — all updating live while your teams are still on-site.
@@ -1017,6 +1059,24 @@ You are watching the actual checklist, not a copy. As staff tap answers on-site 
 - Anything staff typed into their notes box shows in the amber **Staff Notes** panel near the bottom.
 
 - A submitted checklist ends with a green stamp showing exactly when it was submitted, for example Submitted Tue 4 Aug, 3:42 pm.
+
+## Sending reports to clients
+
+Once a checklist is submitted, it appears in the **Review & send reports** panel above the week grid — your queue of reports waiting to go out. Only owners and admins see the send buttons.
+
+- Each entry shows the job, the day and when it was submitted, with an **Awaiting review** or **Sent** chip. **Review** opens the checklist panel; **Send email** opens the send dialog.
+
+- The send dialog shows an **Email preview** — the exact email the client will receive, logo and all — plus the **To** address, an optional CC (for example management), and **Approve & send**.
+
+- The **To** address comes from the client's profile. Switching off **Use the email on the client profile** reveals a box where you can type a different address — it saves automatically for that client and stays until you switch the toggle back. Use it to send test reports to your own inbox.
+
+- After sending, the entry flips to **Sent**, and the record keeps who approved it, when, and the address used. **Send again** re-sends whenever needed; a note in the dialog reminds you it has already gone out.
+
+- Inside the checklist panel, a footer under a submitted checklist prompts "Reviewed it? Send the report to the client." with the same send button, and shows the sent time once it's gone.
+
+- The emailed report includes only the questions that were visible under the checklist's show/hide rules, the client's name and address, the completion date, attachment links for photos, and any staff notes.
+
+> Reports never send themselves — nothing reaches a client until someone presses **Approve & send**. Add your company logo in Organisation Settings and it appears at the top of every report.
 
 ## Reset progress
 
@@ -1195,7 +1255,9 @@ If a period shows something like (3/7 days), only some days in that payroll cycl
 
 - Job time is split across the team. A 3 hour job done by a team of 2 counts as 1 hour 30 minutes per person. The **Team Total** column shows the full job time; **Job Split** shows this person's share.
 
-- Travel time comes from the drive times saved with the schedule — the same route calculations you see when building the day. If no saved travel exists, payroll falls back to measuring the gaps between jobs on the timeline.
+- Travel time comes from the drive times saved with the schedule — the same route calculations you see when building the day. If no saved travel exists, payroll falls back to measuring the gaps between jobs within that team's run.
+
+- Travel is worked out separately for each team's run and then added up. If someone works two teams in one day — say a midday run and an evening run — the free hours between the two runs are never counted as travel.
 
 - If the schedule has a base departure time earlier than the first job, the day starts from the departure, so travel from base to the first job is included.
 
@@ -1253,7 +1315,7 @@ Payroll periods then run seven days from that day. If your cycle starts mid sche
 
 - A period shows fewer than 7 days published: the cycle spans two schedule weeks and only one is published. Publish the other week.
 
-- Travel looked inflated on an old export: earlier versions could count phantom travel from the team's nominal start time on days with no start base. This has been fixed — travel now anchors to the day's actual departure or first job.
+- Travel looked inflated on an old export: earlier versions could count phantom travel from the team's nominal start time on days with no start base, and could count the idle hours between two separate runs as travel when one person worked two teams in a day. Both have been fixed — travel now anchors to each run's actual departure or first job, run by run.
 
 - Times or travel still look wrong: open that day in the schedule editor so it recalculates and saves fresh times, then return to payroll.
 
