@@ -35,6 +35,10 @@ interface Completion {
   completed_by: string;
   completed_at: string;
   is_submitted: boolean;
+  submitted_at: string | null;
+  report_status: string;
+  report_sent_at: string | null;
+  report_sent_to: string | null;
 }
 
 interface JobWithCompletion {
@@ -66,6 +70,7 @@ type CompletionRow = {
   id: string; schedule_job_id: string; items: unknown;
   notes: string | null; completed_by: string; completed_at: string;
   status?: string; submitted_at?: string | null;
+  report_status?: string; report_sent_at?: string | null; report_sent_to?: string | null;
 };
 
 function parseCompletion(c: CompletionRow): Completion {
@@ -77,6 +82,10 @@ function parseCompletion(c: CompletionRow): Completion {
     completed_by: c.completed_by,
     completed_at: c.completed_at,
     is_submitted: c.status === 'submitted' || !!c.submitted_at,
+    submitted_at: c.submitted_at ?? null,
+    report_status: c.report_status || 'pending',
+    report_sent_at: c.report_sent_at ?? null,
+    report_sent_to: c.report_sent_to ?? null,
   };
 }
 
@@ -109,7 +118,7 @@ function ProgressRing({ pct, submitted, size = 36 }: { pct: number; submitted: b
 
 // ─── Checklist panel (admin read-only, live) ──────────────────────────────────
 function ChecklistPanel({
-  job, sections, completion, userNameMap, onClose, loading, onReset,
+  job, sections, completion, userNameMap, onClose, loading, onReset, canSend, onSend,
 }: {
   job: JobWithCompletion;
   sections: ChecklistSection[];
@@ -118,6 +127,8 @@ function ChecklistPanel({
   onClose: () => void;
   loading: boolean;
   onReset: () => Promise<void>;
+  canSend: boolean;
+  onSend: () => void;
 }) {
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [previewType, setPreviewType] = useState<'image' | 'video'>('image');
@@ -466,7 +477,7 @@ function ChecklistPanel({
                 <polyline points="20 6 9 17 4 12"/>
               </svg>
               <span className="text-xs font-bold text-emerald-700">
-                Submitted {new Date(completion.completed_at).toLocaleString('en-AU', {
+                Submitted {new Date(completion.submitted_at || completion.completed_at).toLocaleString('en-AU', {
                   weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit',
                 })}
               </span>
@@ -487,6 +498,36 @@ function ChecklistPanel({
           </div>
         )}
       </div>
+
+      {/* ── Report send footer — the approve step of the review workflow ── */}
+      {isSubmitted && completion && canSend && (
+        <div className="shrink-0 px-5 py-3 bg-white border-t border-border-light flex items-center gap-3">
+          {completion.report_status === 'sent' ? (
+            <>
+              <span className="flex-1 min-w-0 flex items-center gap-1.5 text-[11px] font-semibold text-emerald-700 truncate">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" className="shrink-0"><polyline points="20 6 9 17 4 12"/></svg>
+                Sent{completion.report_sent_to ? ` to ${completion.report_sent_to}` : ''}
+                {completion.report_sent_at ? ` · ${new Date(completion.report_sent_at).toLocaleString('en-AU', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}` : ''}
+              </span>
+              <button onClick={onSend}
+                className="shrink-0 text-[11px] font-semibold text-text-tertiary hover:text-primary px-2.5 py-1.5 rounded-lg border border-border-light transition-colors">
+                Send again
+              </button>
+            </>
+          ) : (
+            <>
+              <span className="flex-1 text-[11px] font-semibold text-amber-700">Reviewed it? Send the report to the client.</span>
+              <button onClick={onSend}
+                className="shrink-0 flex items-center gap-1.5 text-xs font-bold bg-primary text-white px-3.5 py-2 rounded-xl hover:bg-primary-hover transition-colors">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/>
+                </svg>
+                Send to client…
+              </button>
+            </>
+          )}
+        </div>
+      )}
 
       {/* ── Reset progress confirmation ── */}
       <AnimatePresence>
@@ -639,8 +680,16 @@ export default function CompletedPage() {
       weekStartSet.add(getWeekDates(r.schedule_date)[0]);
     });
     const sorted = [...weekStartSet].sort((a, b) => b.localeCompare(a)); // newest first
-    setPublishedWeekStarts(sorted);
-    setWeekIndex(0);
+    setPublishedWeekStarts(prevList => {
+      // Keep the currently viewed week selected if it still exists —
+      // Refresh used to snap the owner back to the newest week mid-review
+      setWeekIndex(prevIdx => {
+        const currentWeek = prevList[prevIdx];
+        const keep = currentWeek ? sorted.indexOf(currentWeek) : -1;
+        return keep >= 0 ? keep : 0;
+      });
+      return sorted;
+    });
     setWeeksLoading(false);
   }, [orgId, supabase]);
 
@@ -663,11 +712,11 @@ export default function CompletedPage() {
 
     // 2. Schedules for the week — PUBLISHED ONLY
     const { data: schedulesRaw } = await supabase
-      .from('schedules').select('id, team_id, schedule_date')
+      .from('schedules').select('id, team_id, schedule_date, staff_ids, driver_staff_id')
       .in('team_id', teamIds).in('schedule_date', weekDates)
       .eq('is_published', true);
     if (!schedulesRaw || schedulesRaw.length === 0) { setJobs([]); setLoading(false); return; }
-    type ScheduleRow = { id: string; team_id: string; schedule_date: string };
+    type ScheduleRow = { id: string; team_id: string; schedule_date: string; staff_ids: string[] | null; driver_staff_id: string | null };
     const schedules = schedulesRaw as ScheduleRow[];
     const scheduleIds = schedules.map(s => s.id);
     const scheduleTeamMap = new Map<string, string>(schedules.map(s => [s.id, s.team_id]));
@@ -689,9 +738,17 @@ export default function CompletedPage() {
     const rawJobs = jobsRaw as RawJob[];
     const jobIds = rawJobs.map(j => j.id);
 
-    // 4. Fetch all assigned staff members
+    // 4. Fetch all assigned staff members. Jobs usually carry no per-job
+    // assignment — the day-level roster (schedule.staff_ids + driver) is the
+    // real crew, and without it "Waiting on" was empty everywhere.
+    const scheduleRosterMap = new Map<string, string[]>(schedules.map(s => {
+      const ids = new Set<string>(s.staff_ids || []);
+      if (s.driver_staff_id) ids.add(s.driver_staff_id);
+      return [s.id, [...ids]];
+    }));
     const allStaffIds = new Set<string>();
     rawJobs.forEach(j => (j.assigned_staff_ids || []).forEach(id => allStaffIds.add(id)));
+    scheduleRosterMap.forEach(ids => ids.forEach(id => allStaffIds.add(id)));
     type StaffRow = { id: string; name: string; user_id: string | null };
     let staffMap = new Map<string, StaffRow>();
     if (allStaffIds.size > 0) {
@@ -703,7 +760,7 @@ export default function CompletedPage() {
     // 5. Completions
     const { data: completionsRaw } = await supabase
       .from('checklist_completions')
-      .select('id, schedule_job_id, items, notes, completed_by, completed_at, status, submitted_at')
+      .select('id, schedule_job_id, items, notes, completed_by, completed_at, status, submitted_at, report_status, report_sent_at, report_sent_to')
       .in('schedule_job_id', jobIds);
     const completionMap = new Map<string, Completion>();
     const allUserIds = new Set<string>();
@@ -713,6 +770,19 @@ export default function CompletedPage() {
       comp.items.forEach(a => { if (a.completed_by) allUserIds.add(a.completed_by); });
       if (c.completed_by) allUserIds.add(c.completed_by);
     });
+
+    // 5b. Client report prefs — recipient + per-client override for the dialog
+    const clientIds = [...new Set(rawJobs.map(j => j.client_id).filter((id): id is string => !!id))];
+    if (clientIds.length > 0) {
+      const { data: clientRows } = await supabase
+        .from('clients').select('id, email, report_use_override, report_override_email').in('id', clientIds);
+      setClientReportMap(new Map(
+        (clientRows as { id: string; email: string | null; report_use_override: boolean | null; report_override_email: string | null }[] || [])
+          .map(c => [c.id, { email: c.email, useOverride: !!c.report_use_override, overrideEmail: c.report_override_email }])
+      ));
+    } else {
+      setClientReportMap(new Map());
+    }
 
     // 6. User display names
     if (allUserIds.size > 0) {
@@ -729,7 +799,10 @@ export default function CompletedPage() {
       const completion = completionMap.get(j.id) || null;
       const teamId = scheduleTeamMap.get(j.schedule_id) || '';
 
-      const assignedStaff: AssignedStaff[] = (j.assigned_staff_ids || []).map((sid, si) => {
+      const effectiveStaffIds = (j.assigned_staff_ids && j.assigned_staff_ids.length > 0)
+        ? j.assigned_staff_ids
+        : (scheduleRosterMap.get(j.schedule_id) || []);
+      const assignedStaff: AssignedStaff[] = effectiveStaffIds.map((sid, si) => {
         const s = staffMap.get(sid);
         return {
           id: sid,
@@ -789,6 +862,9 @@ export default function CompletedPage() {
           completed_at: row.completed_at as string,
           status: row.status as string | undefined,
           submitted_at: row.submitted_at as string | null | undefined,
+          report_status: row.report_status as string | undefined,
+          report_sent_at: row.report_sent_at as string | null | undefined,
+          report_sent_to: row.report_sent_to as string | null | undefined,
         });
 
         setJobs(prev => prev.map(j => {
@@ -818,7 +894,12 @@ export default function CompletedPage() {
   }, [orgId, supabase]);
 
   // ── Open job panel: fetch fresh data + subscribe realtime ───────────────────
+  // seq guard: rapid job switching must not let a slow older fetch overwrite
+  // the newer job's panel data
+  const selectSeqRef = useRef(0);
   const handleSelectJob = useCallback(async (job: JobWithCompletion) => {
+    const seq = ++selectSeqRef.current;
+    const fresh = () => seq === selectSeqRef.current;
     setSelectedJob(job);
     setPanelLoading(true);
     setJobSections([]);
@@ -827,10 +908,11 @@ export default function CompletedPage() {
     // Always fetch fresh completion from DB (don't rely on stale cached data)
     const { data: freshComp } = await supabase
       .from('checklist_completions')
-      .select('id, schedule_job_id, items, notes, completed_by, completed_at, status, submitted_at')
+      .select('id, schedule_job_id, items, notes, completed_by, completed_at, status, submitted_at, report_status, report_sent_at, report_sent_to')
       .eq('schedule_job_id', job.id)
       .maybeSingle();
 
+    if (!fresh()) return;
     if (freshComp) {
       const parsed = parseCompletion(freshComp as CompletionRow);
       setLiveCompletion(parsed);
@@ -843,14 +925,15 @@ export default function CompletedPage() {
     if (job.checklist_id) {
       const { data: cl } = await supabase
         .from('client_checklists').select('sections').eq('id', job.checklist_id).single();
-      if (cl) setJobSections(((cl.sections as Record<string, unknown>[]) || []).map(migrateOldSection));
+      if (fresh() && cl) setJobSections(((cl.sections as Record<string, unknown>[]) || []).map(migrateOldSection));
     } else if (job.client_id) {
       const { data: cl } = await supabase
         .from('client_checklists').select('sections')
         .eq('client_id', job.client_id).eq('is_default', true).maybeSingle();
-      if (cl) setJobSections(((cl.sections as Record<string, unknown>[]) || []).map(migrateOldSection));
+      if (fresh() && cl) setJobSections(((cl.sections as Record<string, unknown>[]) || []).map(migrateOldSection));
     }
 
+    if (!fresh()) return;
     setPanelLoading(false);
 
     // Subscribe to realtime for this specific job (in addition to page-level)
@@ -873,6 +956,9 @@ export default function CompletedPage() {
           completed_at: row.completed_at as string,
           status: row.status as string | undefined,
           submitted_at: row.submitted_at as string | null | undefined,
+          report_status: row.report_status as string | undefined,
+          report_sent_at: row.report_sent_at as string | null | undefined,
+          report_sent_to: row.report_sent_to as string | null | undefined,
         });
         setLiveCompletion(comp);
         setJobs(prev => prev.map(j => j.id === job.id
@@ -913,6 +999,182 @@ export default function CompletedPage() {
       ? { ...prev, completion: null }
       : prev);
   }, [selectedJob, supabase]);
+
+  // ── Send-report workflow ────────────────────────────────────────────────────
+  const canSend = profile?.role === 'owner' || profile?.role === 'admin';
+  interface ClientReportPrefs { email: string | null; useOverride: boolean; overrideEmail: string | null }
+  const [clientReportMap, setClientReportMap] = useState<Map<string, ClientReportPrefs>>(new Map());
+  const effectiveRecipient = (clientId: string | null): string | null => {
+    if (!clientId) return null;
+    const p = clientReportMap.get(clientId);
+    if (!p) return null;
+    return (p.useOverride && p.overrideEmail) ? p.overrideEmail : p.email;
+  };
+  // Autosave the per-client override prefs (toggle saves instantly; typing
+  // debounces). Flushed before sending so the server sees the latest choice.
+  const prefsTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const persistPrefs = useCallback(async (clientId: string, useOverride: boolean, overrideEmail: string | null) => {
+    await supabase.from('clients')
+      .update({ report_use_override: useOverride, report_override_email: overrideEmail })
+      .eq('id', clientId);
+  }, [supabase]);
+  const setPrefs = useCallback((clientId: string, patch: Partial<ClientReportPrefs>, opts: { debounce?: boolean } = {}) => {
+    setClientReportMap(prev => {
+      const cur = prev.get(clientId) || { email: null, useOverride: false, overrideEmail: null };
+      const next = { ...cur, ...patch };
+      if (prefsTimerRef.current) clearTimeout(prefsTimerRef.current);
+      if (opts.debounce) {
+        prefsTimerRef.current = setTimeout(() => persistPrefs(clientId, next.useOverride, next.overrideEmail), 600);
+      } else {
+        persistPrefs(clientId, next.useOverride, next.overrideEmail);
+      }
+      return new Map(prev).set(clientId, next);
+    });
+  }, [persistPrefs]);
+  const [sendTarget, setSendTarget] = useState<JobWithCompletion | null>(null);
+  const [sendCc, setSendCc] = useState('');
+  const [sending, setSending] = useState(false);
+  const [sendError, setSendError] = useState<string | null>(null);
+  const [mailtoFallback, setMailtoFallback] = useState<string | null>(null);
+
+  const [emailPreview, setEmailPreview] = useState<{ subject: string; to: string | null; html: string } | null>(null);
+  const [previewLoading, setPreviewLoading] = useState(false);
+
+  const openSendDialog = (job: JobWithCompletion) => {
+    setSendTarget(job);
+    setSendCc('');
+    setSendError(null);
+    setMailtoFallback(null);
+    setEmailPreview(null);
+    // Fetch the rendered email so the owner sees EXACTLY what the client gets
+    if (job.completion) {
+      setPreviewLoading(true);
+      fetch('/api/checklist/send-report', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ completionId: job.completion.id, preview: true }),
+      })
+        .then(res => res.json())
+        .then(data => { if (data?.preview) setEmailPreview({ subject: data.subject, to: data.to, html: data.html }); })
+        .catch(() => {})
+        .finally(() => setPreviewLoading(false));
+    }
+  };
+
+  // Reflect a successful send in every piece of local state
+  const applySent = useCallback((jobId: string, sentTo: string) => {
+    const patch = (c: Completion | null): Completion | null => c ? ({
+      ...c, report_status: 'sent', report_sent_at: new Date().toISOString(), report_sent_to: sentTo,
+    }) : c;
+    setJobs(prev => prev.map(j => j.id === jobId ? { ...j, completion: patch(j.completion) } : j));
+    setSelectedJob(prev => prev && prev.id === jobId ? { ...prev, completion: patch(prev.completion) } : prev);
+    setLiveCompletion(prev => prev && prev.schedule_job_id === jobId ? (patch(prev) as Completion) : prev);
+  }, []);
+
+  // Plain-text report for the mail-app fallback (no email provider configured)
+  const buildMailtoBody = useCallback(async (job: JobWithCompletion): Promise<string | null> => {
+    const completion = job.completion;
+    if (!completion) return null;
+    let secs: ChecklistSection[] = [];
+    if (job.checklist_id) {
+      const { data: cl } = await supabase
+        .from('client_checklists').select('sections').eq('id', job.checklist_id).maybeSingle();
+      if (cl) secs = ((cl.sections as Record<string, unknown>[]) || []).map(migrateOldSection);
+    } else if (job.client_id) {
+      const { data: cl } = await supabase
+        .from('client_checklists').select('sections')
+        .eq('client_id', job.client_id).eq('is_default', true).maybeSingle();
+      if (cl) secs = ((cl.sections as Record<string, unknown>[]) || []).map(migrateOldSection);
+    }
+    if (secs.length === 0) return null;
+    const answers = new Map(completion.items.map(a => [a.fieldId, a]));
+    const vis = buildVisibilityMap(
+      secs.flatMap(s => s.fields),
+      completion.items.map(a => ({ field_id: a.fieldId, value: a.value, na: !!a.na })),
+    );
+    let body = `Hi,\n\nHere is the completed checklist for ${job.name}:\n\n`;
+    secs.forEach(sec => {
+      if (sec.title) body += `\n— ${sec.title} —\n`;
+      sec.fields.forEach(f => {
+        if (f.type === 'heading' || f.type === 'paragraph' || f.type === 'logic') return;
+        if (vis[f.id] === false) return;
+        const ans = answers.get(f.id);
+        let val = 'No response';
+        if (ans?.na) val = 'N/A';
+        else if (ans?.value === true || ans?.value === 'yes') val = 'Yes';
+        else if (ans?.value === false || ans?.value === 'no') val = 'No';
+        else if (Array.isArray(ans?.value)) val = ans.value.join(', ') || 'None selected';
+        else if (ans?.value) val = String(ans.value);
+        body += `${f.label}: ${val}\n`;
+      });
+    });
+    if (completion.notes) body += `\nNotes: ${completion.notes}`;
+    body += `\n\n---\nSent via CleanRoute Pro`;
+    return body;
+  }, [supabase]);
+
+  const handleSendReport = useCallback(async () => {
+    if (!sendTarget?.completion) return;
+    setSending(true);
+    setSendError(null);
+    // Flush a still-debouncing override save so the server sends to the
+    // address currently on screen
+    if (prefsTimerRef.current && sendTarget.client_id) {
+      clearTimeout(prefsTimerRef.current);
+      const p = clientReportMap.get(sendTarget.client_id);
+      if (p) await persistPrefs(sendTarget.client_id, p.useOverride, p.overrideEmail);
+    }
+    try {
+      const res = await fetch('/api/checklist/send-report', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ completionId: sendTarget.completion.id, cc: sendCc || undefined }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok) {
+        applySent(sendTarget.id, data.sentTo || '');
+        setSendTarget(null);
+      } else if (res.status === 501) {
+        // No provider — offer the owner's own mail app instead
+        const email = effectiveRecipient(sendTarget.client_id);
+        const body = await buildMailtoBody(sendTarget);
+        if (!email || !body) {
+          setSendError(email ? 'Could not build the report for this checklist.' : 'This client has no email address saved — add one on the Clients page.');
+        } else {
+          const subject = encodeURIComponent(`Completed checklist — ${sendTarget.name}`);
+          const ccPart = sendCc ? `&cc=${encodeURIComponent(sendCc)}` : '';
+          setMailtoFallback(`mailto:${email}?subject=${subject}${ccPart}&body=${encodeURIComponent(body)}`);
+        }
+      } else {
+        setSendError(data.error || 'Failed to send the report.');
+      }
+    } catch {
+      setSendError('Network error — please try again.');
+    }
+    setSending(false);
+  }, [sendTarget, sendCc, clientReportMap, persistPrefs, applySent, buildMailtoBody]);
+
+  const handleMarkMailtoSent = useCallback(async () => {
+    if (!sendTarget?.completion) return;
+    setSending(true);
+    try {
+      const res = await fetch('/api/checklist/send-report', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ completionId: sendTarget.completion.id, markOnly: true }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok) {
+        applySent(sendTarget.id, data.sentTo || '');
+        setSendTarget(null);
+      } else {
+        setSendError(data.error || 'Failed to record the send.');
+      }
+    } catch {
+      setSendError('Network error — please try again.');
+    }
+    setSending(false);
+  }, [sendTarget, applySent]);
 
   // ── Stats ───────────────────────────────────────────────────────────────────
   const weekStats = useMemo(() => ({
@@ -1036,6 +1298,87 @@ export default function CompletedPage() {
           </>
         ) : (
           <>
+            {/* ── Review & send inbox: every submitted checklist this week ── */}
+            {(() => {
+              const submitted = jobs
+                .filter(j => j.completion?.is_submitted)
+                .sort((a, b) => (b.completion?.submitted_at || b.completion?.completed_at || '')
+                  .localeCompare(a.completion?.submitted_at || a.completion?.completed_at || ''));
+              if (submitted.length === 0) return null;
+              const awaiting = submitted.filter(j => j.completion?.report_status !== 'sent');
+              return (
+                <div className="px-4 lg:px-6 pt-4">
+                  <div className="bg-white rounded-2xl border border-border-light overflow-hidden">
+                    <div className="flex items-center gap-2.5 px-4 py-3 border-b border-border-light">
+                      <div className="w-8 h-8 rounded-xl bg-primary-light flex items-center justify-center shrink-0">
+                        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="var(--color-primary)" strokeWidth="2">
+                          <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/>
+                          <polyline points="22,6 12,13 2,6"/>
+                        </svg>
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-bold text-text-primary">Review &amp; send reports</p>
+                        <p className="text-[11px] text-text-tertiary">
+                          {awaiting.length > 0
+                            ? `${awaiting.length} checklist${awaiting.length !== 1 ? 's' : ''} awaiting review`
+                            : 'All submitted checklists have been sent'}
+                        </p>
+                      </div>
+                      {awaiting.length > 0 && (
+                        <span className="shrink-0 text-[10px] font-bold text-amber-700 bg-amber-50 border border-amber-200 px-2.5 py-1 rounded-full">
+                          {awaiting.length} to review
+                        </span>
+                      )}
+                    </div>
+                    <div className="divide-y divide-border-light/60 max-h-80 overflow-y-auto custom-scrollbar">
+                      {submitted.map(job => {
+                        const c = job.completion!;
+                        const isSent = c.report_status === 'sent';
+                        const when = c.submitted_at || c.completed_at;
+                        return (
+                          <div key={job.id} className="flex items-center gap-3 px-4 py-2.5 hover:bg-surface-elevated/60 transition-colors">
+                            <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: job.teamColor }} />
+                            <div className="flex-1 min-w-0">
+                              <p className="text-[13px] font-semibold text-text-primary truncate">{job.name}</p>
+                              <p className="text-[11px] text-text-tertiary truncate">
+                                {getShortDayLabel(job.date)}
+                                {when ? ` · submitted ${new Date(when).toLocaleString('en-AU', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}` : ''}
+                              </p>
+                            </div>
+                            {isSent ? (
+                              <span className="shrink-0 flex items-center gap-1 text-[10px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-1 rounded-full"
+                                title={c.report_sent_to ? `Sent to ${c.report_sent_to}` : 'Sent'}>
+                                <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3"><polyline points="20 6 9 17 4 12"/></svg>
+                                Sent
+                              </span>
+                            ) : (
+                              <span className="shrink-0 text-[10px] font-bold text-amber-700 bg-amber-50 border border-amber-200 px-2 py-1 rounded-full">
+                                Awaiting review
+                              </span>
+                            )}
+                            <button onClick={() => handleSelectJob(job)}
+                              className="shrink-0 text-[11px] font-semibold text-text-secondary hover:text-primary px-2.5 py-1.5 rounded-lg border border-border-light hover:border-primary/40 transition-colors">
+                              Review
+                            </button>
+                            {canSend && (
+                              <button onClick={() => openSendDialog(job)}
+                                className={`shrink-0 text-[11px] font-bold px-2.5 py-1.5 rounded-lg transition-colors ${
+                                  isSent
+                                    ? 'text-text-tertiary hover:text-primary border border-border-light'
+                                    : 'bg-primary text-white hover:bg-primary-hover'
+                                }`}>
+                                {isSent ? 'Send again' : 'Send email'}
+                              </button>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </div>
+              );
+            })()}
+
             {/* ══ DESKTOP: 7-column week grid ══ */}
             <div className="hidden lg:grid p-6 grid-cols-7 gap-3 min-w-[900px]">
               {weekDates.map(date => {
@@ -1227,6 +1570,149 @@ export default function CompletedPage() {
         )}
       </div>
 
+      {/* ── Send-report confirmation dialog ── */}
+      <AnimatePresence>
+        {sendTarget && (
+          <motion.div
+            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[70] bg-black/50 flex items-center justify-center p-6"
+            onClick={() => !sending && setSendTarget(null)}
+          >
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.95, opacity: 0 }}
+              onClick={e => e.stopPropagation()}
+              className="bg-white rounded-2xl p-5 max-w-2xl w-full shadow-2xl max-h-[90vh] overflow-y-auto custom-scrollbar"
+            >
+              <div className="flex items-center gap-3 mb-3">
+                <div className="w-10 h-10 rounded-xl bg-primary-light flex items-center justify-center shrink-0">
+                  <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="var(--color-primary)" strokeWidth="2">
+                    <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/>
+                    <polyline points="22,6 12,13 2,6"/>
+                  </svg>
+                </div>
+                <div className="min-w-0">
+                  <h3 className="text-sm font-bold text-text-primary truncate">Send report to client</h3>
+                  <p className="text-[11px] text-text-tertiary truncate">{sendTarget.name}</p>
+                </div>
+              </div>
+
+              {/* ── Email preview: exactly what lands in the client's inbox ── */}
+              <div className="mb-3 rounded-xl border border-border-light overflow-hidden">
+                <div className="px-3.5 py-2 bg-surface-elevated border-b border-border-light">
+                  <p className="text-[10px] font-bold uppercase tracking-widest text-text-tertiary">Email preview</p>
+                  {emailPreview && (
+                    <p className="text-xs font-semibold text-text-primary truncate mt-0.5">{emailPreview.subject}</p>
+                  )}
+                </div>
+                {previewLoading ? (
+                  <div className="h-64 shimmer" />
+                ) : emailPreview ? (
+                  <iframe
+                    title="Email preview"
+                    sandbox=""
+                    srcDoc={emailPreview.html}
+                    className="w-full h-72 bg-white"
+                  />
+                ) : (
+                  <div className="h-24 flex items-center justify-center text-xs text-text-tertiary">
+                    Preview unavailable
+                  </div>
+                )}
+              </div>
+
+              {mailtoFallback ? (
+                <>
+                  <p className="text-xs text-text-secondary leading-relaxed mb-3">
+                    No email service is connected yet, so the report will open in <span className="font-semibold">your own mail app</span> with
+                    everything prefilled — press send there, then come back and mark it as sent.
+                  </p>
+                  <div className="flex gap-2">
+                    <a href={mailtoFallback}
+                      className="flex-1 py-2.5 rounded-xl text-xs font-bold bg-primary text-white text-center hover:bg-primary-hover transition-colors">
+                      Open in my mail app
+                    </a>
+                    <button onClick={handleMarkMailtoSent} disabled={sending}
+                      className="flex-1 py-2.5 rounded-xl text-xs font-bold border border-emerald-300 text-emerald-700 hover:bg-emerald-50 transition-colors disabled:opacity-50">
+                      {sending ? 'Saving…' : "I've sent it — mark as sent"}
+                    </button>
+                  </div>
+                </>
+              ) : (
+                <>
+                  {(() => {
+                    const cid = sendTarget.client_id;
+                    const prefs = cid ? clientReportMap.get(cid) : undefined;
+                    const useProfile = !(prefs?.useOverride);
+                    const effective = effectiveRecipient(cid);
+                    return (
+                      <div className="rounded-xl bg-surface-elevated border border-border-light px-3.5 py-3 mb-3 space-y-2.5">
+                        <div>
+                          <p className="text-[10px] font-bold uppercase tracking-widest text-text-tertiary">To</p>
+                          <p className="text-sm font-semibold text-text-primary">{effective || 'No email available'}</p>
+                          {!effective && (
+                            <p className="text-[11px] text-rose-600 mt-1">
+                              {useProfile ? 'Add an email on the Clients page, or switch the toggle off and enter one below.' : 'Enter an address below.'}
+                            </p>
+                          )}
+                        </div>
+                        {/* Toggle: profile email vs saved per-client override */}
+                        <button type="button"
+                          onClick={() => cid && setPrefs(cid, { useOverride: useProfile })}
+                          className="w-full flex items-center justify-between gap-3 text-left"
+                        >
+                          <span className="text-xs font-medium text-text-secondary">Use the email on the client profile</span>
+                          <span className={`relative w-9 h-5 rounded-full transition-colors shrink-0 ${useProfile ? 'bg-primary' : 'bg-gray-300'}`}>
+                            <span className={`absolute top-0.5 w-4 h-4 rounded-full bg-white shadow transition-all ${useProfile ? 'left-[18px]' : 'left-0.5'}`} />
+                          </span>
+                        </button>
+                        {!useProfile && cid && (
+                          <div>
+                            <input
+                              value={prefs?.overrideEmail || ''}
+                              onChange={e => setPrefs(cid, { overrideEmail: e.target.value }, { debounce: true })}
+                              placeholder="your.email@example.com"
+                              type="email"
+                              className="input-field text-sm w-full"
+                            />
+                            <p className="text-[10px] text-text-tertiary mt-1">
+                              Saved automatically for this client — reports go here until you switch the toggle back.
+                            </p>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })()}
+                  <label className="block text-[10px] font-bold uppercase tracking-widest text-text-tertiary mb-1">CC (optional — e.g. management)</label>
+                  <input value={sendCc} onChange={e => setSendCc(e.target.value)}
+                    placeholder="manager@yourcompany.com"
+                    className="input-field text-sm w-full mb-3" />
+                  {sendTarget.completion?.report_status === 'sent' && (
+                    <p className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mb-3">
+                      Already sent{sendTarget.completion.report_sent_to ? ` to ${sendTarget.completion.report_sent_to}` : ''}
+                      {sendTarget.completion.report_sent_at ? ` on ${new Date(sendTarget.completion.report_sent_at).toLocaleString('en-AU', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}` : ''} — this will send it again.
+                    </p>
+                  )}
+                  <div className="flex gap-2">
+                    <button onClick={() => setSendTarget(null)} disabled={sending}
+                      className="flex-1 py-2.5 rounded-xl text-xs font-bold border border-border text-text-secondary hover:bg-surface-elevated transition-colors disabled:opacity-50">
+                      Cancel
+                    </button>
+                    <button onClick={handleSendReport}
+                      disabled={sending || !effectiveRecipient(sendTarget.client_id)}
+                      className="flex-1 py-2.5 rounded-xl text-xs font-bold bg-primary text-white hover:bg-primary-hover transition-colors disabled:opacity-50">
+                      {sending ? 'Sending…' : 'Approve & send'}
+                    </button>
+                  </div>
+                </>
+              )}
+              {sendError && (
+                <p className="text-[11px] font-semibold text-rose-600 bg-rose-50 border border-rose-200 rounded-lg px-3 py-2 mt-3">{sendError}</p>
+              )}
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       {/* ── Slide-in panel ── */}
       <AnimatePresence>
         {selectedJob && (
@@ -1245,6 +1731,8 @@ export default function CompletedPage() {
               onClose={handleClosePanel}
               loading={panelLoading}
               onReset={handleResetProgress}
+              canSend={canSend}
+              onSend={() => openSendDialog(liveCompletion ? { ...selectedJob, completion: liveCompletion } : selectedJob)}
             />
           </>
         )}

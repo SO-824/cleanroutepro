@@ -330,6 +330,7 @@ export default function StaffChecklistView({
   const [uploading, setUploading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
   const [clientEmail, setClientEmail] = useState<string | null>(null);
   const [errors, setErrors] = useState<Set<string>>(new Set());
   const autoSaveRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -620,6 +621,9 @@ export default function StaffChecklistView({
         if (!active) return;
         const newRow = payload.new as Record<string, unknown>;
         if (newRow?.id) completionIdRef.current = newRow.id as string;
+        // A teammate submitted — lock this form so post-submit edits can't
+        // happen (the DB rejects them anyway; this keeps the UI honest)
+        if (newRow?.status === 'submitted') setSaved(true);
         // Apply remote notes only when the local user has no newer edits —
         // the echo of our own save otherwise reverts in-flight typing (this
         // was the "character limit that deletes text" bug)
@@ -819,29 +823,57 @@ export default function StaffChecklistView({
 
       // Use completionIdRef to avoid a query race between autosave and submit
       const existingId = completionIdRef.current;
-      let saveError: { message?: string } | null = null;
+      let saveError: { message?: string; code?: string } | null = null;
+      let rowVanished = false;
+
+      // Update that detects a deleted row (admin Reset progress): a 0-row
+      // update returns no error, which used to make every later save a
+      // silent no-op forever.
+      const updateRow = async (id: string, body: Record<string, unknown>) => {
+        const { data: rows, error } = await supabase
+          .from('checklist_completions').update(body).eq('id', id).select('id');
+        if (!error && (!rows || rows.length === 0)) {
+          completionIdRef.current = null;
+          rowVanished = true;
+        }
+        return error;
+      };
+
+      // Insert that survives the two-devices race: the unique index on
+      // schedule_job_id makes the second insert fail with 23505 — recover by
+      // adopting the winner's row.
+      const insertRow = async () => {
+        const { data: ins, error } = await supabase.from('checklist_completions')
+          .insert(payload).select('id').single();
+        if (ins) { completionIdRef.current = ins.id; return null; }
+        if (error?.code === '23505' && scheduleJobId) {
+          const { data: winner } = await supabase
+            .from('checklist_completions').select('id')
+            .eq('schedule_job_id', scheduleJobId).maybeSingle();
+          if (winner) {
+            completionIdRef.current = winner.id;
+            return updateRow(winner.id, payload);
+          }
+        }
+        return error;
+      };
 
       if (existingId) {
-        // Row already exists — update it
-        // On autosave: don't downgrade submitted → in_progress
         if (!isFinal) {
-          // Check current status so we don't overwrite a submitted record
+          // Check current status — submitted rows are LOCKED (DB trigger
+          // enforces it): stop writing and lock this form too
           const { data: current } = await supabase
             .from('checklist_completions').select('status').eq('id', existingId).single();
           if (current?.status === 'submitted') {
-            // Only update content, not status
-            const { error } = await supabase.from('checklist_completions').update({
-              items: payload.items, notes: payload.notes, media_urls: payload.media_urls,
-            }).eq('id', existingId);
-            saveError = error;
+            setSaved(true);
+            pendingFieldsRef.current.clear();
+            dirtyRef.current = false;
           } else {
-            const { error } = await supabase.from('checklist_completions').update(payload).eq('id', existingId);
-            saveError = error;
+            saveError = await updateRow(existingId, payload);
           }
         } else {
-          // Final submit — always set submitted
-          const { error } = await supabase.from('checklist_completions').update(payload).eq('id', existingId);
-          saveError = error;
+          // Final submit
+          saveError = await updateRow(existingId, payload);
         }
       } else if (scheduleJobId) {
         // No known row — check DB once (first save for this job)
@@ -850,25 +882,31 @@ export default function StaffChecklistView({
           .eq('schedule_job_id', scheduleJobId).maybeSingle();
         if (existing) {
           completionIdRef.current = existing.id;
-          const { error } = await supabase.from('checklist_completions').update(payload).eq('id', existing.id);
-          saveError = error;
+          saveError = await updateRow(existing.id, payload);
         } else {
-          const { data: ins, error } = await supabase.from('checklist_completions')
-            .insert(payload).select('id').single();
-          if (ins) completionIdRef.current = ins.id;
-          saveError = error;
+          saveError = await insertRow();
         }
       } else {
         // No scheduleJobId, no existing row — insert
-        const { data: ins, error } = await supabase.from('checklist_completions')
-          .insert(payload).select('id').single();
-        if (ins) completionIdRef.current = ins.id;
-        saveError = error;
+        saveError = await insertRow();
+      }
+
+      // Row was deleted underneath us (admin reset) — recreate it so the
+      // staff member's current answers aren't lost
+      if (rowVanished && !saveError) {
+        saveError = await insertRow();
       }
 
       if (saveError) {
         // Keep dirty + pending so the change isn't lost — the next save retries
         console.error('Checklist save failed:', saveError.message || saveError);
+        if (isFinal) {
+          setSubmitError(
+            String(saveError.message || '').includes('submitted_locked')
+              ? 'This checklist was already submitted.'
+              : 'Submit failed — check your connection and press Submit again. Your answers are safe on this device.'
+          );
+        }
       } else {
         // Un-mark only fields whose last edit predates this save's snapshot —
         // fields tapped mid-save stay protected from the upcoming echo
@@ -876,13 +914,22 @@ export default function StaffChecklistView({
           if (ts <= saveStartTs) pendingFieldsRef.current.delete(fieldId);
         });
         dirtyRef.current = pendingFieldsRef.current.size > 0 || notesEditTsRef.current > saveStartTs;
+        // Success is the ONLY path to the done screen — a failed submit used
+        // to show "All done!" and delete the safety draft anyway
+        if (isFinal) {
+          setSubmitError(null);
+          setSaved(true);
+          clearDraft();
+        }
       }
     } catch (err) {
       console.error('Checklist save error:', err);
+      if (isFinal) {
+        setSubmitError('Submit failed — check your connection and press Submit again. Your answers are safe on this device.');
+      }
     }
     setSaving(false);
     saveLockRef.current = false;
-    if (isFinal) { setSaved(true); clearDraft(); }
 
     // If another save was queued while we were saving, run it now
     if (pendingSaveRef.current && !isFinal) {
@@ -1147,6 +1194,9 @@ export default function StaffChecklistView({
           <div className="shrink-0 bg-white border-t border-border-light px-4 py-4">
             {errors.size > 0 && (
               <p className="text-xs text-red-500 font-medium text-center mb-2">Please complete all required fields before submitting.</p>
+            )}
+            {submitError && (
+              <p className="text-xs text-red-600 font-semibold text-center mb-2 bg-red-50 border border-red-200 rounded-lg px-3 py-2">{submitError}</p>
             )}
             {/* Not disabled while saving — autosaves run after every tap, and a
                 pointer-events-none button silently swallows the Submit tap */}
