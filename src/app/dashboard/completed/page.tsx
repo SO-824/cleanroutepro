@@ -126,7 +126,7 @@ function ProgressRing({ pct, submitted, size = 36 }: { pct: number; submitted: b
 // ─── Checklist panel (admin read-only, live) ──────────────────────────────────
 function ChecklistPanel({
   job, sections, completion, userNameMap, onClose, loading, onReset, canSend, onSend,
-  canEdit, viewerId, viewerName, onToggleField, onToggleOption, onEditNotes,
+  canEdit, viewerId, viewerName, onToggleField, onToggleOption, onToggleYesNo, onEditNotes,
 }: {
   job: JobWithCompletion;
   sections: ChecklistSection[];
@@ -142,6 +142,7 @@ function ChecklistPanel({
   viewerName?: string;
   onToggleField: (fieldId: string, next: boolean) => Promise<void>;
   onToggleOption: (fieldId: string, option: string, selected: boolean) => Promise<void>;
+  onToggleYesNo: (fieldId: string, answer: 'yes' | 'no' | null) => Promise<void>;
   onEditNotes: (notes: string) => Promise<void>;
 }) {
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
@@ -157,6 +158,20 @@ function ChecklistPanel({
   const [notesSaveState, setNotesSaveState] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
   const [showOriginalNotes, setShowOriginalNotes] = useState(false);
   const notesTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const handleYesNo = async (fieldId: string, answer: 'yes' | 'no' | null) => {
+    if (togglingIds.has(fieldId)) return;
+    setTogglingIds(prev => new Set(prev).add(fieldId));
+    try {
+      await onToggleYesNo(fieldId, answer);
+    } catch (e) {
+      alert(e instanceof Error && e.message
+        ? e.message
+        : 'Could not save the correction — check your connection and try again.');
+    } finally {
+      setTogglingIds(prev => { const n = new Set(prev); n.delete(fieldId); return n; });
+    }
+  };
 
   const handleOptionToggle = async (fieldId: string, option: string, selected: boolean) => {
     const key = `${fieldId}:${option}`;
@@ -472,16 +487,38 @@ function ChecklistPanel({
                     )
                   ) : null;
 
-                  // Yes/No pill
-                  const yesNoPill = field.type === 'yesno' && isAnswered && !ans?.na ? (
-                    <span className={`text-[11px] font-bold px-2.5 py-1 rounded-lg ${
-                      ans?.value === true || ans?.value === 'yes'
-                        ? 'bg-emerald-100 text-emerald-700'
-                        : 'bg-red-100 text-red-700'
-                    }`}>
-                      {ans?.value === true || ans?.value === 'yes' ? '✓ Yes' : '✗ No'}
-                    </span>
-                  ) : null;
+                  // Yes/No: read-only pill normally; for admins on a submitted
+                  // checklist, two tappable pills (tap current = clear, matching
+                  // the staff form). Stored as 'yes'/'no' strings, same as staff.
+                  const currentYN: 'yes' | 'no' | null =
+                    ans?.value === true || ans?.value === 'yes' ? 'yes'
+                    : ans?.value === false || ans?.value === 'no' ? 'no' : null;
+                  const yesNoPill = field.type !== 'yesno' ? null
+                    : adminEditable ? (
+                      <span className="flex gap-1 shrink-0">
+                        {(['yes', 'no'] as const).map(opt => (
+                          <button key={opt} type="button"
+                            onClick={() => handleYesNo(field.id, currentYN === opt ? null : opt)}
+                            disabled={togglingIds.has(field.id)}
+                            title={currentYN === opt ? 'Tap to clear (admin correction)' : `Set ${opt === 'yes' ? 'Yes' : 'No'} (admin correction)`}
+                            className={`text-[11px] font-bold px-2.5 py-1 rounded-lg transition-all active:scale-95 ${
+                              togglingIds.has(field.id) ? 'opacity-40' : 'cursor-pointer'
+                            } ${currentYN === opt
+                              ? opt === 'yes' ? 'bg-emerald-500 text-white' : 'bg-red-400 text-white'
+                              : 'bg-white border border-border-light text-text-tertiary hover:border-primary/40'}`}>
+                            {opt === 'yes' ? '✓ Yes' : '✗ No'}
+                          </button>
+                        ))}
+                      </span>
+                    ) : isAnswered && !ans?.na ? (
+                      <span className={`text-[11px] font-bold px-2.5 py-1 rounded-lg ${
+                        currentYN === 'yes'
+                          ? 'bg-emerald-100 text-emerald-700'
+                          : 'bg-red-100 text-red-700'
+                      }`}>
+                        {currentYN === 'yes' ? '✓ Yes' : '✗ No'}
+                      </span>
+                    ) : null;
 
                   // Photo/video URLs
                   const mediaUrls: string[] = (field.type === 'photo' || field.type === 'video')
@@ -1307,7 +1344,9 @@ export default function CompletedPage() {
   }, []);
 
   const adminEdit = useCallback(async (payload: {
-    toggles?: ({ fieldId: string; value: boolean } | { fieldId: string; option: string; selected: boolean })[];
+    toggles?: ({ fieldId: string; value: boolean }
+      | { fieldId: string; option: string; selected: boolean }
+      | { fieldId: string; answer: 'yes' | 'no' | null })[];
     notes?: string;
   }) => {
     const job = selectedJob;
@@ -1991,6 +2030,7 @@ export default function CompletedPage() {
               viewerName={profile?.full_name || undefined}
               onToggleField={(fieldId, next) => adminEdit({ toggles: [{ fieldId, value: next }] })}
               onToggleOption={(fieldId, option, selected) => adminEdit({ toggles: [{ fieldId, option, selected }] })}
+              onToggleYesNo={(fieldId, answer) => adminEdit({ toggles: [{ fieldId, answer }] })}
               onEditNotes={(notes) => adminEdit({ notes })}
             />
           </>

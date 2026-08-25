@@ -9,8 +9,9 @@ import { ChecklistSection, migrateOldSection } from '@/components/checklist/type
  * Owner/admin corrections on a SUBMITTED checklist:
  *   { completionId, toggles?: [{ fieldId, value }], notes?: string }
  *
- * - toggles may only target checkbox fields — the template is the authority,
- *   so typed answers can't be altered through this route.
+ * - toggles may target checkboxes ({fieldId,value}), multi-select options
+ *   ({fieldId,option,selected}) and Yes/No answers ({fieldId,answer}) — the
+ *   template is the authority, so typed answers can't be altered here.
  * - notes replaces the staff notes verbatim (empty string clears them).
  * - The database RPC preserves the pre-edit originals on first edit and
  *   stamps admin_edited_at/by; the submitted-lock stays closed to all
@@ -32,7 +33,7 @@ export async function POST(request: NextRequest) {
     const body = await request.json();
     const { completionId, toggles, notes } = body as {
       completionId?: string;
-      toggles?: { fieldId?: unknown; value?: unknown; option?: unknown; selected?: unknown }[];
+      toggles?: { fieldId?: unknown; value?: unknown; option?: unknown; selected?: unknown; answer?: unknown }[];
       notes?: unknown;
     };
     if (!completionId) return NextResponse.json({ error: 'Missing completionId' }, { status: 400 });
@@ -43,10 +44,13 @@ export async function POST(request: NextRequest) {
     }
     for (const t of toggleList) {
       const isCheckbox = typeof t?.fieldId === 'string' && typeof t?.value === 'boolean'
-        && t?.option === undefined && t?.selected === undefined;
+        && t?.option === undefined && t?.selected === undefined && t?.answer === undefined;
       const isOption = typeof t?.fieldId === 'string' && typeof t?.option === 'string'
-        && typeof t?.selected === 'boolean' && t?.value === undefined;
-      if (!isCheckbox && !isOption) {
+        && typeof t?.selected === 'boolean' && t?.value === undefined && t?.answer === undefined;
+      const isYesNo = typeof t?.fieldId === 'string'
+        && (t?.answer === 'yes' || t?.answer === 'no' || t?.answer === null)
+        && t?.value === undefined && t?.option === undefined && t?.selected === undefined;
+      if (!isCheckbox && !isOption && !isYesNo) {
         return NextResponse.json({ error: 'Invalid toggle payload' }, { status: 400 });
       }
     }
@@ -78,6 +82,7 @@ export async function POST(request: NextRequest) {
         ((checklist?.sections as Record<string, unknown>[]) || []).map(migrateOldSection);
       const allFields = sections.flatMap(s => s.fields);
       const checkboxIds = new Set(allFields.filter(f => f.type === 'checkbox').map(f => f.id));
+      const yesnoIds = new Set(allFields.filter(f => f.type === 'yesno').map(f => f.id));
       const optionFields = new Map(allFields
         .filter(f => (f.type === 'multiselect' || f.type === 'multidropdown') && (f.options?.length || 0) > 0)
         .map(f => [f.id, new Set(f.options as string[])]));
@@ -87,6 +92,11 @@ export async function POST(request: NextRequest) {
           if (!opts || !opts.has(t.option)) {
             return NextResponse.json(
               { error: 'That option is not part of this checklist item' }, { status: 400 });
+          }
+        } else if (t.answer !== undefined) {
+          if (!yesnoIds.has(t.fieldId as string)) {
+            return NextResponse.json(
+              { error: 'That item is not a Yes/No question' }, { status: 400 });
           }
         } else if (!checkboxIds.has(t.fieldId as string)) {
           return NextResponse.json(
@@ -101,9 +111,15 @@ export async function POST(request: NextRequest) {
       p_completion_id: completionId,
       p_editor: user.id,
       p_toggles: toggleList.length > 0
-        ? toggleList.map(t => typeof t.option === 'string'
-            ? { fieldId: t.fieldId as string, option: t.option, selected: t.selected as boolean }
-            : { fieldId: t.fieldId as string, value: t.value as boolean })
+        ? toggleList.map(t => {
+            if (typeof t.option === 'string') {
+              return { fieldId: t.fieldId as string, option: t.option, selected: t.selected as boolean };
+            }
+            if (t.answer !== undefined) {
+              return { fieldId: t.fieldId as string, answer: t.answer as 'yes' | 'no' | null };
+            }
+            return { fieldId: t.fieldId as string, value: t.value as boolean };
+          })
         : null,
       p_notes: setNotes ? (notes as string) : null,
       p_set_notes: setNotes,

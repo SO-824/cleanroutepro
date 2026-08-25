@@ -1084,11 +1084,13 @@ Owners and admins can fix two things on a checklist after staff have submitted i
 
 - **Tick or untick checkboxes.** On a submitted checklist the checkbox squares become clickable — press one to tick a missed item (or untick a wrong one). This works for single checkboxes and for every option inside a checkbox list (multi-select items). Each change saves instantly.
 
+- **Switch Yes/No answers.** Yes/No questions show tappable Yes and No pills — press the other one to switch, or press the current answer again to clear it back to unanswered. If the question controls follow-up questions, they appear or hide to match, exactly as they would have for staff.
+
 - **Edit the staff notes.** Press **Edit** on the Staff Notes panel, type your changes and press **Done**. Changes save automatically as you type, and undo works while you're editing.
 
 Corrections leave a trail: the notes panel shows an **Edited by** stamp with who made the change and when, and **View original staff notes** shows exactly what staff wrote before the first edit — the original is never lost. The corrected version is what the client report emails.
 
-- Only tick-boxes and the notes can be corrected. Yes/No answers, typed answers, dropdown selections, dates and photos can't be edited — if those are wrong, use **Reset progress** and have staff redo the checklist.
+- Only tick-boxes, Yes/No answers and the notes can be corrected. Typed answers, dropdown selections, dates and photos can't be edited — if those are wrong, use **Reset progress** and have staff redo the checklist.
 
 - Corrections work on any submitted checklist, including ones whose report has already been sent — press **Send again** afterwards if the client should get the fixed version.
 
