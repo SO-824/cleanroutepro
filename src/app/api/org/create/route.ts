@@ -1,4 +1,5 @@
 import { createClient } from '@/lib/supabase/server';
+import { createClient as createAdminClient } from '@supabase/supabase-js';
 import { NextResponse } from 'next/server';
 
 export async function POST(request: Request) {
@@ -6,6 +7,13 @@ export async function POST(request: Request) {
     const supabase = await createClient();
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+
+    // profiles.role/org_id are column-locked to the server — session clients
+    // can no longer write them
+    const admin = createAdminClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_ROLE_KEY!,
+    );
 
     const { name, staff, clients } = await request.json();
     if (!name?.trim()) return NextResponse.json({ error: 'Organisation name is required' }, { status: 400 });
@@ -25,7 +33,7 @@ export async function POST(request: Request) {
     // back on failure — an unchecked failure here is what produces an account
     // that "has an org" with no membership row (invisible in Accounts & Access
     // and unrevokable).
-    const { error: profileErr } = await supabase.from('profiles').update({
+    const { error: profileErr } = await admin.from('profiles').update({
       org_id: org.id,
       role: 'owner',
       full_name: user.user_metadata?.full_name || '',
@@ -47,7 +55,7 @@ export async function POST(request: Request) {
     });
 
     if (memberErr) {
-      await supabase.from('profiles').update({ org_id: null }).eq('id', user.id);
+      await admin.from('profiles').update({ org_id: null }).eq('id', user.id);
       await supabase.from('organizations').delete().eq('id', org.id);
       console.error('[Create Org] membership insert failed:', memberErr.message);
       return NextResponse.json({ error: `Failed to create membership: ${memberErr.message}` }, { status: 500 });

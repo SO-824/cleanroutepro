@@ -1,4 +1,5 @@
 import { createClient as createServerClient } from '@/lib/supabase/server';
+import { createClient as createAdminClient } from '@supabase/supabase-js';
 import { NextResponse } from 'next/server';
 
 export async function POST(request: Request) {
@@ -24,8 +25,13 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Not a member of this organisation' }, { status: 403 });
     }
 
-    // Update active org and role in profiles
-    const { error } = await supabase
+    // Update active org and role in profiles. Service role — these columns
+    // are locked against session clients; membership was verified above.
+    const admin = createAdminClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_ROLE_KEY!,
+    );
+    const { error } = await admin
       .from('profiles')
       .update({ org_id: orgId, role: membership.role })
       .eq('id', user.id);

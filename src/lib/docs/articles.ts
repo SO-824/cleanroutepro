@@ -1078,6 +1078,20 @@ Once a checklist is submitted, it appears in the **Review & send reports** panel
 
 > Reports never send themselves — nothing reaches a client until someone presses **Approve & send**. Add your company logo in Organisation Settings and it appears at the top of every report.
 
+## Correcting a submitted checklist
+
+Owners and admins can fix two things on a checklist after staff have submitted it, straight from the checklist panel:
+
+- **Tick or untick checkboxes.** On a submitted checklist the checkbox squares become clickable — press one to tick a missed item (or untick a wrong one). This works for single checkboxes and for every option inside a checkbox list (multi-select items). Each change saves instantly.
+
+- **Edit the staff notes.** Press **Edit** on the Staff Notes panel, type your changes and press **Done**. Changes save automatically as you type, and undo works while you're editing.
+
+Corrections leave a trail: the notes panel shows an **Edited by** stamp with who made the change and when, and **View original staff notes** shows exactly what staff wrote before the first edit — the original is never lost. The corrected version is what the client report emails.
+
+- Only tick-boxes and the notes can be corrected. Yes/No answers, typed answers, dropdown selections, dates and photos can't be edited — if those are wrong, use **Reset progress** and have staff redo the checklist.
+
+- Corrections work on any submitted checklist, including ones whose report has already been sent — press **Send again** afterwards if the client should get the fixed version.
+
 ## Reset progress
 
 **Reset progress** sits near the top of the panel whenever the job has any recorded progress.

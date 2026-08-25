@@ -39,6 +39,9 @@ interface Completion {
   report_status: string;
   report_sent_at: string | null;
   report_sent_to: string | null;
+  admin_edited_at: string | null;
+  admin_edited_by: string | null;
+  original_notes: string | null;
 }
 
 interface JobWithCompletion {
@@ -71,6 +74,7 @@ type CompletionRow = {
   notes: string | null; completed_by: string; completed_at: string;
   status?: string; submitted_at?: string | null;
   report_status?: string; report_sent_at?: string | null; report_sent_to?: string | null;
+  admin_edited_at?: string | null; admin_edited_by?: string | null; original_notes?: string | null;
 };
 
 function parseCompletion(c: CompletionRow): Completion {
@@ -86,6 +90,9 @@ function parseCompletion(c: CompletionRow): Completion {
     report_status: c.report_status || 'pending',
     report_sent_at: c.report_sent_at ?? null,
     report_sent_to: c.report_sent_to ?? null,
+    admin_edited_at: c.admin_edited_at ?? null,
+    admin_edited_by: c.admin_edited_by ?? null,
+    original_notes: c.original_notes ?? null,
   };
 }
 
@@ -119,6 +126,7 @@ function ProgressRing({ pct, submitted, size = 36 }: { pct: number; submitted: b
 // ─── Checklist panel (admin read-only, live) ──────────────────────────────────
 function ChecklistPanel({
   job, sections, completion, userNameMap, onClose, loading, onReset, canSend, onSend,
+  canEdit, viewerId, viewerName, onToggleField, onToggleOption, onEditNotes,
 }: {
   job: JobWithCompletion;
   sections: ChecklistSection[];
@@ -129,11 +137,98 @@ function ChecklistPanel({
   onReset: () => Promise<void>;
   canSend: boolean;
   onSend: () => void;
+  canEdit: boolean;
+  viewerId?: string;
+  viewerName?: string;
+  onToggleField: (fieldId: string, next: boolean) => Promise<void>;
+  onToggleOption: (fieldId: string, option: string, selected: boolean) => Promise<void>;
+  onEditNotes: (notes: string) => Promise<void>;
 }) {
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [previewType, setPreviewType] = useState<'image' | 'video'>('image');
   const [showResetConfirm, setShowResetConfirm] = useState(false);
   const [resetting, setResetting] = useState(false);
+
+  // ── Admin corrections on a submitted checklist ──
+  const adminEditable = canEdit && !!completion?.is_submitted;
+  const [togglingIds, setTogglingIds] = useState<Set<string>>(new Set());
+  const [editingNotes, setEditingNotes] = useState(false);
+  const [notesDraft, setNotesDraft] = useState('');
+  const [notesSaveState, setNotesSaveState] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
+  const [showOriginalNotes, setShowOriginalNotes] = useState(false);
+  const notesTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const handleOptionToggle = async (fieldId: string, option: string, selected: boolean) => {
+    const key = `${fieldId}:${option}`;
+    if (togglingIds.has(key)) return;
+    setTogglingIds(prev => new Set(prev).add(key));
+    try {
+      await onToggleOption(fieldId, option, selected);
+    } catch (e) {
+      alert(e instanceof Error && e.message
+        ? e.message
+        : 'Could not save the correction — check your connection and try again.');
+    } finally {
+      setTogglingIds(prev => { const n = new Set(prev); n.delete(key); return n; });
+    }
+  };
+
+  const handleToggle = async (fieldId: string, next: boolean) => {
+    if (togglingIds.has(fieldId)) return;
+    setTogglingIds(prev => new Set(prev).add(fieldId));
+    try {
+      await onToggleField(fieldId, next);
+    } catch (e) {
+      alert(e instanceof Error && e.message
+        ? e.message
+        : 'Could not save the correction — check your connection and try again.');
+    } finally {
+      setTogglingIds(prev => { const n = new Set(prev); n.delete(fieldId); return n; });
+    }
+  };
+
+  // Saves are chained so an in-flight autosave can never land AFTER a newer
+  // one and resurrect older text server-side.
+  const saveChainRef = useRef<Promise<unknown>>(Promise.resolve());
+  const saveNotes = (v: string) => {
+    setNotesSaveState('saving');
+    const p = saveChainRef.current.then(() => onEditNotes(v));
+    saveChainRef.current = p.then(() => setNotesSaveState('saved'), () => setNotesSaveState('error'));
+    return p;
+  };
+  const startEditNotes = () => {
+    setNotesDraft(completion?.notes || '');
+    setEditingNotes(true);
+    setNotesSaveState('idle');
+  };
+  const onNotesDraftChange = (v: string) => {
+    setNotesDraft(v);
+    if (notesTimerRef.current) clearTimeout(notesTimerRef.current);
+    notesTimerRef.current = setTimeout(() => { saveNotes(v).catch(() => {}); }, 800);
+  };
+  const finishEditNotes = async () => {
+    // Flush the debounce so Done never loses the last keystrokes
+    if (notesTimerRef.current) { clearTimeout(notesTimerRef.current); notesTimerRef.current = null; }
+    try {
+      await saveNotes(notesDraft);
+      setEditingNotes(false);
+    } catch (e) {
+      // The edit is NOT saved — keep the editor open rather than silently
+      // discarding what the admin typed
+      alert(e instanceof Error && e.message
+        ? `Could not save the notes — they have not been saved. ${e.message}`
+        : 'Could not save the notes — they have not been saved. Check your connection and press Done again.');
+    }
+  };
+  // A pending debounce must not fire against a different job after unmount
+  useEffect(() => () => {
+    if (notesTimerRef.current) clearTimeout(notesTimerRef.current);
+  }, []);
+  const editorName = completion?.admin_edited_by
+    ? (completion.admin_edited_by === viewerId
+        ? (viewerName || 'admin')
+        : (userNameMap.get(completion.admin_edited_by) || 'admin'))
+    : 'admin';
 
   // Build userId → {color, name} from assignedStaff first (consistent colors)
   const staffByUserId = useMemo(() => {
@@ -182,7 +277,13 @@ function ChecklistPanel({
     )),
   [sections, visibilityMap]);
 
-  const answeredCount = useMemo(() => countAnswered(completion?.items || []), [completion]);
+  // Count only answers whose fields are visible under the logic rules —
+  // hidden answers linger in items (e.g. after an admin untick) and would
+  // push the count past the visible denominator.
+  const answeredCount = useMemo(() => {
+    const visibleIds = new Set(allFields.map(f => f.id));
+    return countAnswered((completion?.items || []).filter(a => visibleIds.has(a.fieldId)));
+  }, [completion, allFields]);
   const pct = allFields.length > 0 ? Math.round((answeredCount / allFields.length) * 100) : 0;
   const isSubmitted = completion?.is_submitted ?? false;
 
@@ -337,9 +438,29 @@ function ChecklistPanel({
                   else if (ans?.value && field.type !== 'photo' && field.type !== 'video')
                     displayVal = String(ans.value);
 
-                  // Status icon for checkbox/yesno
+                  // Status icon for checkbox/yesno. For admins on a submitted
+                  // checklist the box itself is the tick/untick control.
+                  const checkedNow = field.type === 'checkbox' && isAnswered && !ans?.na;
+                  const tickColor = answererColor || '#4F46E5';
                   const statusIcon = field.type === 'checkbox' ? (
-                    isAnswered && !ans?.na ? (
+                    adminEditable ? (
+                      <button
+                        type="button"
+                        onClick={() => handleToggle(field.id, !checkedNow)}
+                        disabled={togglingIds.has(field.id)}
+                        title={checkedNow ? 'Untick (admin correction)' : 'Tick (admin correction)'}
+                        className={`w-6 h-6 rounded-lg flex items-center justify-center shrink-0 transition-all active:scale-90 ${
+                          togglingIds.has(field.id) ? 'opacity-40' : 'cursor-pointer hover:ring-2 hover:ring-primary/40'
+                        } ${checkedNow ? '' : 'border-2 border-gray-300 bg-white'}`}
+                        style={checkedNow ? { backgroundColor: tickColor } : undefined}
+                      >
+                        {checkedNow && (
+                          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="3">
+                            <polyline points="20 6 9 17 4 12"/>
+                          </svg>
+                        )}
+                      </button>
+                    ) : checkedNow ? (
                       <div className="w-6 h-6 rounded-lg flex items-center justify-center shrink-0"
                         style={{ backgroundColor: answererColor }}>
                         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="3">
@@ -386,8 +507,36 @@ function ChecklistPanel({
                               isAnswered ? 'text-text-primary' : 'text-text-tertiary'
                             }`}>{field.label}</p>
 
-                            {/* Display value for non-checkbox, non-yesno, non-media fields */}
-                            {field.type !== 'checkbox' && field.type !== 'yesno' && field.type !== 'photo' && field.type !== 'video' && (
+                            {/* Multi-select lists: tickable option rows for admins */}
+                            {adminEditable && (field.type === 'multiselect' || field.type === 'multidropdown') && (field.options?.length || 0) > 0 ? (
+                              <div className="mt-1.5 space-y-0.5">
+                                {field.options!.map(opt => {
+                                  const sel = Array.isArray(ans?.value) && (ans!.value as string[]).includes(opt);
+                                  const busy = togglingIds.has(`${field.id}:${opt}`);
+                                  return (
+                                    <button key={opt} type="button"
+                                      onClick={() => handleOptionToggle(field.id, opt, !sel)}
+                                      disabled={busy}
+                                      title={sel ? 'Untick (admin correction)' : 'Tick (admin correction)'}
+                                      className={`w-full flex items-center gap-2 text-left px-1.5 py-1 -mx-1.5 rounded-lg transition-colors ${
+                                        busy ? 'opacity-40' : 'hover:bg-surface-elevated cursor-pointer'
+                                      }`}>
+                                      <span className={`w-[18px] h-[18px] rounded-md flex items-center justify-center shrink-0 ${
+                                        sel ? '' : 'border-2 border-gray-300 bg-white'
+                                      }`}
+                                        style={sel ? { backgroundColor: tickColor } : undefined}>
+                                        {sel && (
+                                          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="3.5">
+                                            <polyline points="20 6 9 17 4 12"/>
+                                          </svg>
+                                        )}
+                                      </span>
+                                      <span className={`text-xs ${sel ? 'text-text-primary font-medium' : 'text-text-secondary'}`}>{opt}</span>
+                                    </button>
+                                  );
+                                })}
+                              </div>
+                            ) : field.type !== 'checkbox' && field.type !== 'yesno' && field.type !== 'photo' && field.type !== 'video' && (
                               displayVal ? (
                                 <p className="text-xs text-text-secondary mt-1 font-medium">{displayVal}</p>
                               ) : (
@@ -455,17 +604,66 @@ function ChecklistPanel({
           ))
         )}
 
-        {/* Notes */}
-        {completion?.notes && (
+        {/* Notes — admins can correct them on a submitted checklist */}
+        {completion && (completion.notes || adminEditable) && (
           <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4">
-            <div className="flex items-center gap-2 mb-2">
+            <div className="flex items-center gap-2 mb-2 flex-wrap">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#D97706" strokeWidth="2">
                 <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
                 <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
               </svg>
               <p className="text-[11px] font-bold uppercase tracking-widest text-amber-700">Staff Notes</p>
+              {completion.admin_edited_at && (
+                <span className="text-[10px] font-semibold text-amber-800 bg-amber-100 border border-amber-200 rounded-md px-1.5 py-0.5"
+                  title={new Date(completion.admin_edited_at).toLocaleString('en-AU')}>
+                  Edited by {editorName} · {new Date(completion.admin_edited_at).toLocaleDateString('en-AU', { day: 'numeric', month: 'short' })}
+                </span>
+              )}
+              <span className="flex-1" />
+              {editingNotes && (
+                <span className="text-[10px] font-semibold text-amber-700/80">
+                  {notesSaveState === 'saving' ? 'Saving…'
+                    : notesSaveState === 'saved' ? 'Saved ✓'
+                    : notesSaveState === 'error' ? 'Save failed — edit again to retry' : ''}
+                </span>
+              )}
+              {adminEditable && (
+                editingNotes ? (
+                  <button onClick={finishEditNotes}
+                    className="text-[11px] font-bold text-amber-800 hover:underline">Done</button>
+                ) : (
+                  <button onClick={startEditNotes}
+                    className="text-[11px] font-bold text-amber-800 hover:underline">Edit</button>
+                )
+              )}
             </div>
-            <p className="text-sm text-text-primary whitespace-pre-wrap leading-relaxed">{completion.notes}</p>
+            {editingNotes ? (
+              <textarea
+                value={notesDraft}
+                onChange={e => onNotesDraftChange(e.target.value)}
+                rows={4}
+                autoFocus
+                placeholder="Notes for this clean…"
+                className="w-full text-sm text-text-primary bg-white border border-amber-200 rounded-xl p-3 leading-relaxed focus:outline-none focus:ring-2 focus:ring-amber-300 resize-y"
+              />
+            ) : completion.notes ? (
+              <p className="text-sm text-text-primary whitespace-pre-wrap leading-relaxed">{completion.notes}</p>
+            ) : (
+              <p className="text-xs text-amber-700/70 italic">No staff notes.</p>
+            )}
+            {completion.original_notes !== null && completion.original_notes !== (completion.notes || '') && (
+              <div className="mt-2">
+                <button onClick={() => setShowOriginalNotes(v => !v)}
+                  className="text-[10px] font-semibold text-amber-800/80 hover:underline">
+                  {showOriginalNotes ? 'Hide original' : 'View original staff notes'}
+                </button>
+                {showOriginalNotes && (
+                  <p className="mt-1 text-xs text-amber-900/70 whitespace-pre-wrap border-l-2 border-amber-300 pl-2">
+                    {completion.original_notes || '(no notes were written)'}
+                  </p>
+                )}
+              </div>
+            )}
           </div>
         )}
 
@@ -634,6 +832,9 @@ export default function CompletedPage() {
   const [jobSections, setJobSections] = useState<ChecklistSection[]>([]);
   const [panelLoading, setPanelLoading] = useState(false);
   const [liveCompletion, setLiveCompletion] = useState<Completion | null>(null);
+  // Which job the panel is open for — read inside the org-wide realtime
+  // handler (a closure that can't see selectedJob state)
+  const selectedJobIdRef = useRef<string | null>(null);
   const [userNameMap, setUserNameMap] = useState<Map<string, string>>(new Map());
   const realtimeChannelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
   const pageChannelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
@@ -760,7 +961,7 @@ export default function CompletedPage() {
     // 5. Completions
     const { data: completionsRaw } = await supabase
       .from('checklist_completions')
-      .select('id, schedule_job_id, items, notes, completed_by, completed_at, status, submitted_at, report_status, report_sent_at, report_sent_to')
+      .select('id, schedule_job_id, items, notes, completed_by, completed_at, status, submitted_at, report_status, report_sent_at, report_sent_to, admin_edited_at, admin_edited_by, original_notes')
       .in('schedule_job_id', jobIds);
     const completionMap = new Map<string, Completion>();
     const allUserIds = new Set<string>();
@@ -769,6 +970,7 @@ export default function CompletedPage() {
       completionMap.set(c.schedule_job_id, comp);
       comp.items.forEach(a => { if (a.completed_by) allUserIds.add(a.completed_by); });
       if (c.completed_by) allUserIds.add(c.completed_by);
+      if (c.admin_edited_by) allUserIds.add(c.admin_edited_by);
     });
 
     // 5b. Client report prefs — recipient + per-client override for the dialog
@@ -865,6 +1067,9 @@ export default function CompletedPage() {
           report_status: row.report_status as string | undefined,
           report_sent_at: row.report_sent_at as string | null | undefined,
           report_sent_to: row.report_sent_to as string | null | undefined,
+          admin_edited_at: row.admin_edited_at as string | null | undefined,
+          admin_edited_by: row.admin_edited_by as string | null | undefined,
+          original_notes: row.original_notes as string | null | undefined,
         });
 
         setJobs(prev => prev.map(j => {
@@ -882,7 +1087,11 @@ export default function CompletedPage() {
           if (!prev || prev.id !== jobId) return prev;
           return { ...prev, completion: comp };
         });
+        // Only the currently open job may update the live panel — the old
+        // prev===null wildcard let ANY org event hijack a "Not started" panel
+        // (and admin corrections would then hit the wrong completion).
         setLiveCompletion(prev => {
+          if (selectedJobIdRef.current !== jobId) return prev;
           if (prev === null || prev.schedule_job_id === jobId) return comp;
           return prev;
         });
@@ -898,6 +1107,7 @@ export default function CompletedPage() {
   // the newer job's panel data
   const selectSeqRef = useRef(0);
   const handleSelectJob = useCallback(async (job: JobWithCompletion) => {
+    selectedJobIdRef.current = job.id;
     const seq = ++selectSeqRef.current;
     const fresh = () => seq === selectSeqRef.current;
     setSelectedJob(job);
@@ -908,7 +1118,7 @@ export default function CompletedPage() {
     // Always fetch fresh completion from DB (don't rely on stale cached data)
     const { data: freshComp } = await supabase
       .from('checklist_completions')
-      .select('id, schedule_job_id, items, notes, completed_by, completed_at, status, submitted_at, report_status, report_sent_at, report_sent_to')
+      .select('id, schedule_job_id, items, notes, completed_by, completed_at, status, submitted_at, report_status, report_sent_at, report_sent_to, admin_edited_at, admin_edited_by, original_notes')
       .eq('schedule_job_id', job.id)
       .maybeSingle();
 
@@ -959,6 +1169,9 @@ export default function CompletedPage() {
           report_status: row.report_status as string | undefined,
           report_sent_at: row.report_sent_at as string | null | undefined,
           report_sent_to: row.report_sent_to as string | null | undefined,
+          admin_edited_at: row.admin_edited_at as string | null | undefined,
+          admin_edited_by: row.admin_edited_by as string | null | undefined,
+          original_notes: row.original_notes as string | null | undefined,
         });
         setLiveCompletion(comp);
         setJobs(prev => prev.map(j => j.id === job.id
@@ -970,6 +1183,7 @@ export default function CompletedPage() {
   }, [supabase]);
 
   const handleClosePanel = useCallback(() => {
+    selectedJobIdRef.current = null;
     setSelectedJob(null);
     setLiveCompletion(null);
     setJobSections([]);
@@ -1070,6 +1284,44 @@ export default function CompletedPage() {
     setSelectedJob(prev => prev && prev.id === jobId ? { ...prev, completion: patch(prev.completion) } : prev);
     setLiveCompletion(prev => prev && prev.schedule_job_id === jobId ? (patch(prev) as Completion) : prev);
   }, []);
+
+  // Reflect an admin correction (toggle/notes) in every piece of local state.
+  // The realtime channel will echo the same row shortly after — harmless,
+  // since both paths write identical data.
+  const applyAdminEdit = useCallback((jobId: string, fresh: {
+    items: unknown; notes: string | null;
+    admin_edited_at: string | null; admin_edited_by: string | null; original_notes: string | null;
+  }) => {
+    const patch = (c: Completion | null): Completion | null => c ? ({
+      ...c, items: parseItems(fresh.items), notes: fresh.notes,
+      admin_edited_at: fresh.admin_edited_at, admin_edited_by: fresh.admin_edited_by,
+      original_notes: fresh.original_notes,
+    }) : c;
+    setJobs(prev => prev.map(j => {
+      if (j.id !== jobId) return j;
+      const c = patch(j.completion);
+      return { ...j, completion: c, answeredFields: c ? countAnswered(c.items) : j.answeredFields };
+    }));
+    setSelectedJob(prev => prev && prev.id === jobId ? { ...prev, completion: patch(prev.completion) } : prev);
+    setLiveCompletion(prev => prev && prev.schedule_job_id === jobId ? (patch(prev) as Completion) : prev);
+  }, []);
+
+  const adminEdit = useCallback(async (payload: {
+    toggles?: ({ fieldId: string; value: boolean } | { fieldId: string; option: string; selected: boolean })[];
+    notes?: string;
+  }) => {
+    const job = selectedJob;
+    const completionId = liveCompletion?.id || job?.completion?.id;
+    if (!job || !completionId) throw new Error('No checklist open');
+    const res = await fetch('/api/checklist/admin-edit', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ completionId, ...payload }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || 'Failed to save the correction');
+    if (data.completion) applyAdminEdit(job.id, data.completion);
+  }, [selectedJob, liveCompletion, applyAdminEdit]);
 
   // Plain-text report for the mail-app fallback (no email provider configured)
   const buildMailtoBody = useCallback(async (job: JobWithCompletion): Promise<string | null> => {
@@ -1724,6 +1976,7 @@ export default function CompletedPage() {
               style={{ touchAction: 'none' }}
             />
             <ChecklistPanel
+              key={selectedJob.id}
               job={selectedJob}
               sections={jobSections}
               completion={liveCompletion}
@@ -1733,6 +1986,12 @@ export default function CompletedPage() {
               onReset={handleResetProgress}
               canSend={canSend}
               onSend={() => openSendDialog(liveCompletion ? { ...selectedJob, completion: liveCompletion } : selectedJob)}
+              canEdit={canSend}
+              viewerId={profile?.id}
+              viewerName={profile?.full_name || undefined}
+              onToggleField={(fieldId, next) => adminEdit({ toggles: [{ fieldId, value: next }] })}
+              onToggleOption={(fieldId, option, selected) => adminEdit({ toggles: [{ fieldId, option, selected }] })}
+              onEditNotes={(notes) => adminEdit({ notes })}
             />
           </>
         )}
