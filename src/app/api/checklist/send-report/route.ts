@@ -26,6 +26,14 @@ function esc(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
+/** Env dashboards store values literally — a REPORT_FROM_EMAIL pasted with its
+ *  surrounding quotes (fine in .env.local, where dotenv strips them) would make
+ *  the provider reject the from field. Strip wrapping quotes and whitespace. */
+function cleanFromAddress(v: string | undefined): string | null {
+  const s = (v || '').trim().replace(/^["']+|["']+$/g, '').trim();
+  return s.includes('@') ? s : null;
+}
+
 /** Absolute http(s) only — a relative or malformed value must never become an <img src>.
  *  SVG/WebP are also dropped: Gmail and Outlook render them as broken images,
  *  so falling back to the text-only header beats broken branding. */
@@ -229,7 +237,7 @@ export async function POST(request: NextRequest) {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        from: process.env.REPORT_FROM_EMAIL || `${orgName} <onboarding@resend.dev>`,
+        from: cleanFromAddress(process.env.REPORT_FROM_EMAIL) || `${orgName} <onboarding@resend.dev>`,
         to: [recipient!],
         ...(ccList.length > 0 ? { cc: ccList } : {}),
         subject,
